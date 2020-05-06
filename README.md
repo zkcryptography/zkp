@@ -15,8 +15,8 @@ It provides two levels of API:
     (x),         // Secret variables
     (A, G, H),   // Public variables unique to each proof
     (B) :        // Public variables common between proofs
-    A = (x * B), // Statements to prove
-    G = (x * H) 
+    A = (B ^ x) && // Statements to prove
+    G = (H ^ x) 
     }
   ```
   This expands into a module containing an implementation of proving,
