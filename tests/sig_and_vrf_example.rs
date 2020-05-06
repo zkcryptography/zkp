@@ -21,8 +21,9 @@ use curve25519_dalek::scalar::Scalar;
 extern crate zkp;
 pub use zkp::Transcript;
 
-define_proof! {sig_proof, "Sig", (x), (A), (B) : A = (x * B) }
-define_proof! {vrf_proof, "VRF", (x), (A, G, H), (B) : A = (x * B), G = (x * H) }
+define_proof! {sig_proof, "Sig", (x), (A), (B) : A = (B ^ x) }
+define_proof! {vrf_proof, "VRF", (x), (A, G, H), (B) : A = (B ^ x) && G = (H ^ x) }
+define_proof! {test_proof, "test", (x, y), (A, G, H), (B) : A = (B ^ x * H^y) && G = (H ^ x) }
 
 /// Defines how the construction interacts with the transcript.
 trait TranscriptProtocol {

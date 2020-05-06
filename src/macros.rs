@@ -15,12 +15,12 @@ macro_rules! __compute_formula_constraint {
     // Unbracket a statement
     (($public_vars:ident, $secret_vars:ident) ($($x:tt)*)) => {
         // Add a trailing +
-        __compute_formula_constraint!(($public_vars,$secret_vars) $($x)* +)
+        __compute_formula_constraint!(($public_vars,$secret_vars) $($x)* *)
     };
     // Inner part of the formula: give a list of &Scalars
     // Since there's a trailing +, we can just generate the list as normal...
     (($public_vars:ident, $secret_vars:ident)
-     $( $scalar:ident * $point:ident +)+ ) => {
+     $( $point:ident ^ $scalar:ident *)+ ) => {
         vec![ $( ($secret_vars.$scalar , $public_vars.$point), )* ]
     };
 }
@@ -35,11 +35,11 @@ macro_rules! __compute_formula_constraint {
 /// two equal discrete logarithms ("DLEQ") is specified as:
 ///
 /// ```rust,ignore
-/// define_proof! {dleq, "DLEQ Proof", (x), (A, B, H), (G) : A = (x * G), B = (x * H) }
+/// define_proof! {dleq, "DLEQ Proof", (x), (A, B, H), (G) : A = (G ^ x), B = (H ^ x) }
 /// ```
 ///
 /// This creates a module `dleq` with code for proving knowledge of a
-/// secret `x: Scalar` such that `A = x * G`, `B = x * H` for
+/// secret `x: Scalar` such that `A = G ^ x`, `B = H ^ x` for
 /// per-proof public parameters `A, B, H: RistrettoPoint` and common
 /// parameters `G: RistrettoPoint`; the UTF-8 string `"DLEQ Proof"` is
 /// added to the transcript as a domain separator.
@@ -53,12 +53,12 @@ macro_rules! __compute_formula_constraint {
 ///     (A,B,C,...),   // public per-proof parameter labels (upper-case)
 ///     (G,H,...)      // public common parameter labels (upper-case)
 ///     :
-///     LHS = (x * A + y * B + z * C + ... ),  // comma-separated statements
+///     LHS = (A ^ x * B ^ y * C ^ z * ... ),  // comma-separated statements
 ///     ...
 /// }
 /// ```
 ///
-/// Statements have the form `LHS = (A * x + B * y + C * z + ... )`,
+/// Statements have the form `LHS = (A ^ x * B ^ y * C ^ z * ... )`,
 /// where `LHS` is one of the points listed as a public parameter, and
 /// the right-hand side is a sum of public points multiplied by secret
 /// scalars.
@@ -85,7 +85,7 @@ macro_rules! define_proof {
         :
         // List of statements to prove
         // Format: LHS = ( ... RHS expr ... ),
-        $($lhs:ident = $statement:tt),+
+        $($lhs:ident = $statement:tt)&&+
     ) => {
         /// An auto-generated Schnorr proof implementation.
         ///
