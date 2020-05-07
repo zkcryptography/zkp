@@ -23,7 +23,9 @@ pub use zkp::Transcript;
 
 define_proof! {sig_proof, "Sig", (x), (A), (B) : A = (B ^ x) }
 define_proof! {vrf_proof, "VRF", (x), (A, G, H), (B) : A = (B ^ x) && G = (H ^ x) }
-define_proof! {test_proof, "test", (x, y), (A, G, H), (B) : A = (B ^ x * H^y) && G = (H ^ x) }
+define_proof! {test_no_common, "test_no_common", (x, y), (A, G, H, B), () : A = (B ^ x * H^y) && G = (H ^ x) && G = (H ^ x) }
+define_proof! {test_no_pub, "test_no_pub", (x, y), (), (A, G, H, B) : A = (B ^ x * H^y) && G = (H ^ x) && G = (H ^ x) }
+define_proof! {test_or, "test_or", (x, y), (A, G, H), (B) : A = (B ^ x * H^y) && G = (H ^ x) || G = (H ^ x) }
 
 /// Defines how the construction interacts with the transcript.
 trait TranscriptProtocol {
