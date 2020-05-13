@@ -7,6 +7,7 @@ use curve25519_dalek::traits::{IsIdentity, VartimeMultiscalarMul};
 
 use crate::toolbox::{SchnorrCS, TranscriptProtocol};
 use crate::{BatchableProof, CompactProof, ProofError, Transcript};
+use crate::toolbox::shamir_secrets::SecretShare;
 
 /// Used to produce verification results.
 ///
@@ -92,8 +93,8 @@ impl<'a> Verifier<'a> {
             .ok_or(ProofError::VerificationFailure)?;
 
         // Recompute the prover's commitments based on their claimed challenge value:
-        let minus_c = -proof.challenge;
-        for (lhs_var, rhs_lc) in &self.constraints {
+        for (index, (lhs_var, rhs_lc)) in self.constraints.iter().enumerate() {
+            let minus_c = -proof.challenges[index];
             let commitment = RistrettoPoint::vartime_multiscalar_mul(
                 rhs_lc
                     .iter()
@@ -111,8 +112,9 @@ impl<'a> Verifier<'a> {
 
         // Recompute the challenge and check if it's the claimed one
         let challenge = self.transcript.get_challenge(b"chal");
+        let rec_challenge = SecretShare::reconstruct(proof.clone().challenges);
 
-        if challenge == proof.challenge {
+        if rec_challenge.is_ok() && challenge == rec_challenge.unwrap() {
             Ok(())
         } else {
             Err(ProofError::VerificationFailure)

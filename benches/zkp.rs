@@ -31,19 +31,19 @@ mod cmz {
         (C_1, C_2, C_3, C_4, C_5, C_6, C_7, C_8, C_9, C_10, P, Q, V),
         (X_1, X_2, X_3, X_4, X_5, X_6, X_7, X_8, X_9, X_10, A, B)
         :
-        C_1  = (m_1 * P + z_1  * A),
-        C_2  = (m_2 * P + z_2  * A),
-        C_3  = (m_3 * P + z_3  * A),
-        C_4  = (m_4 * P + z_4  * A),
-        C_5  = (m_5 * P + z_5  * A),
-        C_6  = (m_6 * P + z_6  * A),
-        C_7  = (m_7 * P + z_7  * A),
-        C_8  = (m_8 * P + z_8  * A),
-        C_9  = (m_9 * P + z_9  * A),
-        C_10 = (m_10* P + z_10 * A),
-        V = (m_1*X_1 + m_2*X_2 + m_3*X_3 + m_4*X_4 + m_5*X_5 + m_6*X_6
-             + m_7*X_7 + m_8*X_8 + m_9*X_9 + m_10*X_10 + minus_z_Q*Q)
+        C_1 = (P ^ m_1 * A ^ z_1 ) &&
+        C_2 = (P ^ m_2 * A ^ z_2 ) &&
+        C_3 = (P ^ m_3 * A ^ z_3 ) &&
+        C_4 = (P ^ m_4 * A ^ z_4 ) &&
+        C_5 = (P ^ m_5 * A ^ z_5 ) &&
+        C_6 = (P ^ m_6 * A ^ z_6 ) &&
+        C_7 = (P ^ m_7 * A ^ z_7 ) &&
+        C_8 = (P ^ m_8 * A ^ z_8 ) &&
+        C_9 = (P ^ m_9 * A ^ z_9 ) &&
+        C_10 = (P ^ m_10 * A ^ z_10 ) &&
+        V = (X_1^m_1 * X_2 ^ m_2* X_3 ^ m_3* X_4 ^ m_4* X_5 ^ m_5* X_6 ^ m_6
+           * X_7 ^ m_7* X_8 ^ m_8* X_9 ^ m_9* X_10 ^ m_10* Q ^ minus_z_Q)
     }
 }
 
-define_proof! {dleq, "DLEQ proof", (x), (A, B, H), (G) : A = (x * G), B = (x * H) }
+define_proof! {dleq, "DLEQ proof", (x), (A, B, H), (G) : A = (G ^ x) && B = (H ^ x) }

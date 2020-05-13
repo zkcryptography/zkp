@@ -218,7 +218,7 @@ macro_rules! define_proof {
                     $(
                         $secret_var: prover.allocate_scalar(
                             TRANSCRIPT_LABELS.$secret_var.as_bytes(),
-                            *assignments.$secret_var,
+                            Some(*assignments.$secret_var),
                         ),
                     )+
                 };

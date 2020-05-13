@@ -52,7 +52,7 @@ fn create_and_verify_compact_dleq() {
         let mut prover = Prover::new(b"DLEQProof", &mut transcript);
 
         // XXX committing var names to transcript forces ordering (?)
-        let var_x = prover.allocate_scalar(b"x", x);
+        let var_x = prover.allocate_scalar(b"x", Some(x));
         let (var_B, _) = prover.allocate_point(b"B", B);
         let (var_H, _) = prover.allocate_point(b"H", H);
         let (var_A, cmpr_A) = prover.allocate_point(b"A", A);
@@ -92,7 +92,7 @@ fn create_and_verify_batchable_dleq() {
         let mut prover = Prover::new(b"DLEQProof", &mut transcript);
 
         // XXX committing var names to transcript forces ordering (?)
-        let var_x = prover.allocate_scalar(b"x", x);
+        let var_x = prover.allocate_scalar(b"x", Some(x));
         let (var_B, _) = prover.allocate_point(b"B", B);
         let (var_H, _) = prover.allocate_point(b"H", H);
         let (var_A, cmpr_A) = prover.allocate_point(b"A", A);
@@ -139,7 +139,7 @@ fn create_and_batch_verify_batchable_dleq() {
             let mut prover = Prover::new(b"DLEQProof", &mut transcript);
 
             // XXX committing var names to transcript forces ordering (?)
-            let var_x = prover.allocate_scalar(b"x", x);
+            let var_x = prover.allocate_scalar(b"x", Some(x));
             let (var_B, _) = prover.allocate_point(b"B", B);
             let (var_H, _) = prover.allocate_point(b"H", H);
             let (var_A, cmpr_A) = prover.allocate_point(b"A", A);

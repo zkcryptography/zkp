@@ -14,7 +14,7 @@ use curve25519_dalek::scalar::Scalar;
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CompactProof {
     /// The Fiat-Shamir challenge.
-    pub challenge: Scalar,
+    pub challenges: Vec<Scalar>,
     /// The prover's responses, one per secret variable.
     pub responses: Vec<Scalar>,
 }

@@ -59,7 +59,7 @@ fn create_compact_dleq(b: &mut Bencher) {
         let mut transcript = Transcript::new(b"DLEQTest");
         let mut prover = Prover::new(b"DLEQProof", &mut transcript);
 
-        let var_x = prover.allocate_scalar(b"x", x);
+        let var_x = prover.allocate_scalar(b"x", Some(x));
         let (var_G, _) = prover.allocate_point(b"G", G);
         let (var_H, _) = prover.allocate_point(b"H", H);
         let (var_A, _cmpr_A) = prover.allocate_point(b"A", A);
@@ -86,7 +86,7 @@ fn verify_compact_dleq(b: &mut Bencher) {
         let mut prover = Prover::new(b"DLEQProof", &mut transcript);
 
         // XXX committing var names to transcript forces ordering (?)
-        let var_x = prover.allocate_scalar(b"x", x);
+        let var_x = prover.allocate_scalar(b"x", Some(x));
         let (var_G, _) = prover.allocate_point(b"G", G);
         let (var_H, _) = prover.allocate_point(b"H", H);
         let (var_A, cmpr_A) = prover.allocate_point(b"A", A);
@@ -129,7 +129,7 @@ fn create_batchable_dleq(b: &mut Bencher) {
         let mut transcript = Transcript::new(b"DLEQTest");
         let mut prover = Prover::new(b"DLEQProof", &mut transcript);
 
-        let var_x = prover.allocate_scalar(b"x", x);
+        let var_x = prover.allocate_scalar(b"x", Some(x));
         let (var_G, _) = prover.allocate_point(b"G", G);
         let (var_H, _) = prover.allocate_point(b"H", H);
         let (var_A, _cmpr_A) = prover.allocate_point(b"A", A);
@@ -155,7 +155,7 @@ fn verify_batchable_dleq(b: &mut Bencher) {
         let mut transcript = Transcript::new(b"DLEQTest");
         let mut prover = Prover::new(b"DLEQProof", &mut transcript);
 
-        let var_x = prover.allocate_scalar(b"x", x);
+        let var_x = prover.allocate_scalar(b"x", Some(x));
         let (var_G, _) = prover.allocate_point(b"G", G);
         let (var_H, _) = prover.allocate_point(b"H", H);
         let (var_A, cmpr_A) = prover.allocate_point(b"A", A);
@@ -204,7 +204,7 @@ fn batch_verify_batchable_dleq_helper(batch_size: usize, b: &mut Bencher) {
             let mut prover = Prover::new(b"DLEQProof", &mut transcript);
 
             // XXX committing var names to transcript forces ordering (?)
-            let var_x = prover.allocate_scalar(b"x", x);
+            let var_x = prover.allocate_scalar(b"x", Some(x));
             let (var_G, _) = prover.allocate_point(b"G", G);
             let (var_H, _) = prover.allocate_point(b"H", H);
             let (var_A, cmpr_A) = prover.allocate_point(b"A", A);
