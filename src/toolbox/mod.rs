@@ -94,6 +94,7 @@ pub trait SchnorrCS {
     /// Add a constraint of the form `lhs = linear_combination`.
     fn constrain(
         &mut self,
+        clause_nr: usize,
         lhs: Self::PointVar,
         linear_combination: Vec<(Self::ScalarVar, Self::PointVar)>,
     );

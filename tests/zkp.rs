@@ -40,13 +40,13 @@ fn create_and_verify_compact() {
         dleq::prove_compact(
             &mut transcript,
             dleq::ProveAssignments {
-                x: &x,
+                x: &Some(x),
                 A: &A,
                 B: &B,
                 G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
                 H: &H,
             },
-        )
+        ).unwrap()
     };
 
     // Serialize and parse bincode representation
@@ -83,13 +83,13 @@ fn create_and_verify_batchable() {
         dleq::prove_batchable(
             &mut transcript,
             dleq::ProveAssignments {
-                x: &x,
+                x: &Some(x),
                 A: &A,
                 B: &B,
                 G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
                 H: &H,
             },
-        )
+        ).unwrap()
     };
 
     // Serialize and parse bincode representation
@@ -136,13 +136,13 @@ fn create_batch_and_batch_verify() {
             let (proof, points) = dleq::prove_batchable(
                 &mut transcript,
                 dleq::ProveAssignments {
-                    x: &x,
+                    x: &Some(x),
                     A: &A,
                     B: &B,
                     G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
                     H: &H,
                 },
-            );
+            ).unwrap();
 
             proofs.push(proof);
             pubkeys.push(points.A);

@@ -72,6 +72,24 @@ macro_rules! __compute_formula_constraint {
 /// variable-time code.
 #[macro_export]
 macro_rules! define_proof {
+    // (
+    //     $proof_module_name:ident // Name of the module to create
+    //     ,
+    //     $proof_label_string:expr // A string literal, used as a domain separator
+    //     ,
+    //     ( $($secret_var:ident),+ ) // Secret variables, sep by commas
+    //     ,
+    //     ( $($instance_var:ident),* ) // Public instance variables, separated by commas
+    //     ,
+    //     ( $($common_var:ident),* ) // Public common variables, separated by commas
+    //     :
+    //     // List of statements to prove
+    //     // Format: LHS = ( ... RHS expr ... ),
+    //     // $($lhs:ident = $statement:tt)&&+
+    //     $($($lhs:ident = $statement:tt)&&+)||*
+    // ) => {
+    //
+    // };
     (
         $proof_module_name:ident // Name of the module to create
         ,
@@ -163,19 +181,23 @@ macro_rules! define_proof {
                     publics: PublicVars<CS>,
                 ) {
                     //TODO: process ORs differently
+                    let mut clause_nr = 1;
                     $($(
                         cs.constrain(
+                            clause_nr,
                             publics.$lhs,
                             __compute_formula_constraint!( (publics, secrets) $statement ),
                         );
-                    )+)*
+                    )+
+                    clause_nr += 1;
+                    )*
                 }
             }
 
             /// Named parameters for [`prove_compact`] and [`prove_batchable`].
             #[derive(Copy, Clone)]
             pub struct ProveAssignments<'a> {
-                $(pub $secret_var: &'a Scalar,)+
+                $(pub $secret_var: &'a Option<Scalar>,)+
                 $(pub $instance_var: &'a RistrettoPoint,)*
                 $(pub $common_var: &'a RistrettoPoint,)*
             }
@@ -218,7 +240,7 @@ macro_rules! define_proof {
                     $(
                         $secret_var: prover.allocate_scalar(
                             TRANSCRIPT_LABELS.$secret_var.as_bytes(),
-                            Some(*assignments.$secret_var),
+                            *assignments.$secret_var,
                         ),
                     )+
                 };
@@ -263,20 +285,28 @@ macro_rules! define_proof {
             pub fn prove_compact(
                 transcript: &mut Transcript,
                 assignments: ProveAssignments,
-            ) -> (CompactProof, CompressedPoints) {
+            ) -> Result<(CompactProof, CompressedPoints), ProofError> {
                 let (prover, compressed) = build_prover(transcript, assignments);
 
-                (prover.prove_compact(), compressed)
+                let result = prover.prove_compact();
+                if result.is_err() {
+                    return Err(result.err().unwrap());
+                }
+                Ok((result.unwrap(), compressed))
             }
 
             /// Given a transcript and assignments to secret and public variables, produce a proof in batchable format.
             pub fn prove_batchable(
                 transcript: &mut Transcript,
                 assignments: ProveAssignments,
-            ) -> (BatchableProof, CompressedPoints) {
+            ) -> Result<(BatchableProof, CompressedPoints), ProofError> {
                 let (prover, compressed) = build_prover(transcript, assignments);
 
-                (prover.prove_batchable(), compressed)
+                let result = prover.prove_batchable();
+                if result.is_err() {
+                    return Err(result.err().unwrap());
+                }
+                Ok((result.unwrap(), compressed))
             }
 
             fn build_verifier<'a>(

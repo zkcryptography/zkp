@@ -12,6 +12,7 @@ pub trait SchnorrCS {
 
     fn constrain(
         &mut self,
+        clause_nr: usize,
         lhs: Self::PointVar,
         linear_combination: Vec<(Self::ScalarVar, Self::PointVar)>,
     );

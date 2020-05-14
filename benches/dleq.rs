@@ -42,8 +42,8 @@ fn dleq_statement<CS: SchnorrCS>(
     G: CS::PointVar,
     H: CS::PointVar,
 ) {
-    cs.constrain(A, vec![(x, G)]);
-    cs.constrain(B, vec![(x, H)]);
+    cs.constrain(1, A, vec![(x, G)]);
+    cs.constrain(1, B, vec![(x, H)]);
 }
 
 #[bench]
@@ -67,7 +67,7 @@ fn create_compact_dleq(b: &mut Bencher) {
 
         dleq_statement(&mut prover, var_x, var_A, var_B, var_G, var_H);
 
-        prover.prove_compact()
+        prover.prove_compact().unwrap()
     });
 }
 
@@ -94,7 +94,7 @@ fn verify_compact_dleq(b: &mut Bencher) {
 
         dleq_statement(&mut prover, var_x, var_A, var_B, var_G, var_H);
 
-        (prover.prove_compact(), cmpr_A, cmpr_B)
+        (prover.prove_compact().unwrap(), cmpr_A, cmpr_B)
     };
 
     let cmpr_G = G.compress();
@@ -137,7 +137,7 @@ fn create_batchable_dleq(b: &mut Bencher) {
 
         dleq_statement(&mut prover, var_x, var_A, var_B, var_G, var_H);
 
-        prover.prove_batchable()
+        prover.prove_batchable().unwrap()
     });
 }
 
@@ -163,7 +163,7 @@ fn verify_batchable_dleq(b: &mut Bencher) {
 
         dleq_statement(&mut prover, var_x, var_A, var_B, var_G, var_H);
 
-        (prover.prove_batchable(), cmpr_A, cmpr_B)
+        (prover.prove_batchable().unwrap(), cmpr_A, cmpr_B)
     };
 
     let cmpr_G = G.compress();
@@ -212,7 +212,7 @@ fn batch_verify_batchable_dleq_helper(batch_size: usize, b: &mut Bencher) {
 
             dleq_statement(&mut prover, var_x, var_A, var_B, var_G, var_H);
 
-            (prover.prove_batchable(), cmpr_A, cmpr_B)
+            (prover.prove_batchable().unwrap(), cmpr_A, cmpr_B)
         };
         proofs.push(proof);
         cmpr_As.push(cmpr_A);

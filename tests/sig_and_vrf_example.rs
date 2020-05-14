@@ -23,9 +23,10 @@ pub use zkp::Transcript;
 
 define_proof! {sig_proof, "Sig", (x), (A), (B) : A = (B ^ x) }
 define_proof! {vrf_proof, "VRF", (x), (A, G, H), (B) : A = (B ^ x) && G = (H ^ x) }
-define_proof! {test_no_common, "test_no_common", (x, y), (A, G, H, B), () : A = (B ^ x * H^y) && G = (H ^ x) && G = (H ^ x) }
-define_proof! {test_no_pub, "test_no_pub", (x, y), (), (A, G, H, B) : A = (B ^ x * H^y) && G = (H ^ x) && G = (H ^ x) }
-define_proof! {test_or, "test_or", (x, y), (A, G, H), (B) : A = (B ^ x * H^y) && G = (H ^ x) || G = (H ^ x) }
+
+define_proof! {test_parsing_no_common, "test_parsing_no_common", (x, y), (A, G, H, B), () : A = (B ^ x * H^y) && G = (H ^ x) && G = (H ^ x) }
+define_proof! {test_parsing_no_pub, "test_parsing_no_pub", (x, y), (), (A, G, H, B) : A = (B ^ x * H^y) && G = (H ^ x) && G = (H ^ x) }
+define_proof! {test_parsing_or, "test_parsing_or", (x, y), (A, G, H), (B) : A = (B ^ x * H^y) && G = (H ^ x) || G = (H ^ x) }
 
 /// Defines how the construction interacts with the transcript.
 trait TranscriptProtocol {
@@ -91,11 +92,11 @@ impl KeyPair {
         let (proof, _points) = sig_proof::prove_batchable(
             sig_transcript,
             sig_proof::ProveAssignments {
-                x: &self.sk.0,
+                x: &Some(self.sk.0),
                 A: &self.pk.0,
                 B: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
             },
-        );
+        ).unwrap();
 
         Signature(proof)
     }
@@ -116,13 +117,13 @@ impl KeyPair {
         let (proof, points) = vrf_proof::prove_compact(
             proof_transcript,
             vrf_proof::ProveAssignments {
-                x: &self.sk.0,
+                x: &Some(self.sk.0),
                 A: &self.pk.0,
                 B: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
                 G: &G,
                 H: &H,
             },
-        );
+        ).unwrap();
 
         (VrfOutput(points.G), VrfProof(proof))
     }

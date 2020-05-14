@@ -33,8 +33,8 @@ fn dleq_statement<CS: SchnorrCS>(
     B: CS::PointVar,
     H: CS::PointVar,
 ) {
-    cs.constrain(A, vec![(x, B)]);
-    cs.constrain(G, vec![(x, H)]);
+    cs.constrain(1, A, vec![(x, B)]);
+    cs.constrain(1, G, vec![(x, H)]);
 }
 
 #[test]
@@ -60,7 +60,7 @@ fn create_and_verify_compact_dleq() {
 
         dleq_statement(&mut prover, var_x, var_A, var_G, var_B, var_H);
 
-        (prover.prove_compact(), cmpr_A, cmpr_G)
+        (prover.prove_compact().unwrap(), cmpr_A, cmpr_G)
     };
 
     let mut transcript = Transcript::new(b"DLEQTest");
@@ -100,7 +100,7 @@ fn create_and_verify_batchable_dleq() {
 
         dleq_statement(&mut prover, var_x, var_A, var_G, var_B, var_H);
 
-        (prover.prove_batchable(), cmpr_A, cmpr_G)
+        (prover.prove_batchable().unwrap(), cmpr_A, cmpr_G)
     };
 
     let mut transcript = Transcript::new(b"DLEQTest");
@@ -147,7 +147,7 @@ fn create_and_batch_verify_batchable_dleq() {
 
             dleq_statement(&mut prover, var_x, var_A, var_G, var_B, var_H);
 
-            (prover.prove_batchable(), cmpr_A, cmpr_G)
+            (prover.prove_batchable().unwrap(), cmpr_A, cmpr_G)
         };
         proofs.push(proof);
         cmpr_As.push(cmpr_A);

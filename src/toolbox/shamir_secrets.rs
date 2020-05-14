@@ -11,13 +11,13 @@ impl SecretShare {
     pub fn complete(secret: Scalar, shares: &mut Vec<Option<Scalar>>) -> Result<SecretShare, String> {
         let nr_of_shares = shares.iter().filter(|&n| n.is_some()).count();
 
-        let output = shares.iter().map(|share| {
+        let mut output: Vec<Scalar> = shares.iter().map(|share| {
             return match share.is_some() {
                 true => share.unwrap(),
                 false => secret //TODO: Shamir Secret Sharing
             };
         }).collect();
-        shares.insert(0, Some(secret));
+        output.insert(0, secret);
         Ok(SecretShare {
             secret,
             shares: output,

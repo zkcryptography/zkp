@@ -5,9 +5,9 @@ use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::traits::MultiscalarMul;
 
 use crate::toolbox::{SchnorrCS, TranscriptProtocol};
-use crate::{BatchableProof, CompactProof, Transcript};
+use crate::{BatchableProof, CompactProof, Transcript, ProofError};
 use crate::toolbox::shamir_secrets::SecretShare;
-use std::ops::{MulAssign, AddAssign};
+use std::iter;
 
 /// Used to create proofs.
 ///
@@ -27,7 +27,7 @@ pub struct Prover<'a> {
     scalars: Vec<Option<Scalar>>,
     points: Vec<RistrettoPoint>,
     point_labels: Vec<&'static [u8]>,
-    constraints: Vec<(PointVar, Vec<(ScalarVar, PointVar)>)>,
+    constraints: Vec<(usize, PointVar, Vec<(ScalarVar, PointVar)>)>,
 }
 
 /// A secret variable used during proving.
@@ -76,7 +76,7 @@ impl<'a> Prover<'a> {
     }
 
     /// The compact and batchable proofs differ only by which data they store.
-    fn prove_impl(self) -> (Vec<Scalar>, Vec<Scalar>, Vec<CompressedRistretto>) {
+    fn prove_impl(self) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<CompressedRistretto>), ProofError> {
         // Construct a TranscriptRng
         let mut rng_builder = self.transcript.build_rng();
         for scalar in &self.scalars {
@@ -102,9 +102,16 @@ impl<'a> Prover<'a> {
         let mut commitments = Vec::with_capacity(self.constraints.len());
         let mut fakeResponses = Vec::with_capacity(self.constraints.iter().map(|cs| &cs.1).count());
         let mut shares = Vec::with_capacity(self.constraints.len());
-        for (lhs_var, rhs_lc) in &self.constraints {
+        let mut prev_clause_nr = 0;
+        for (clause_nr, lhs_var, rhs_lc) in &self.constraints {
             let commitment = match blindings[(rhs_lc[0].0).0].is_some() {
                 true => {
+                    if prev_clause_nr == 0 {
+                        prev_clause_nr = *clause_nr;
+                    }
+                    if prev_clause_nr != *clause_nr {
+                        return Err(ProofError::InputMismatch);
+                    }
                     shares.push(None);
                     RistrettoPoint::multiscalar_mul(
                         rhs_lc.iter().map(|(sc_var, _pt_var)| {
@@ -115,20 +122,20 @@ impl<'a> Prover<'a> {
                     )
                 }
                 false => {
-                    let mut point1 = RistrettoPoint::multiscalar_mul(
-                        rhs_lc.iter().map(|(_sc_var, _pt_var)| {
-                            let response = Scalar::random(&mut transcript_rng);
-                            fakeResponses.push(Some(response));
-                            response
-                        }),
-                        rhs_lc.iter().map(|(_sc_var, pt_var)| self.points[pt_var.0]),
-                    );
                     let challenge = Scalar::random(&mut transcript_rng);
                     shares.push(Some(challenge));
-                    let mut point2 = self.points[lhs_var.0];
-                    point2.mul_assign(&challenge);
-                    point1.add_assign(&point2);
-                    point1
+                    RistrettoPoint::multiscalar_mul(
+                        rhs_lc.iter()
+                            .map(|(_sc_var, _pt_var)| {
+                                let response = Scalar::random(&mut transcript_rng);
+                                fakeResponses.push(Some(response));
+                                response
+                            })
+                            .chain(iter::once(-&challenge)),
+                        rhs_lc.iter()
+                            .map(|(_sc_var, pt_var)| self.points[pt_var.0])
+                            .chain(iter::once(self.points[lhs_var.0])),
+                    )
                 }
             };
 
@@ -144,7 +151,7 @@ impl<'a> Prover<'a> {
         let challenges = SecretShare::complete(challenge, &mut shares).unwrap();
         let responses = self.scalars.iter().zip(blindings)
             .zip(fakeResponses)
-            .zip(&challenges.shares)
+            .zip(&challenges.shares[1..])
             .map(|(scBlResp, ch)| {
                 match scBlResp.1.is_some() {
                     true => scBlResp.1.unwrap(),
@@ -152,28 +159,35 @@ impl<'a> Prover<'a> {
                 }
             })
             .collect::<Vec<Scalar>>();
-
-        (challenges.shares, responses, commitments)
+        Ok((challenges.shares, responses, commitments))
     }
 
     /// Consume this prover to produce a compact proof.
-    pub fn prove_compact(self) -> CompactProof {
-        let (challenges, responses, _) = self.prove_impl();
+    pub fn prove_compact(self) -> Result<CompactProof, ProofError> {
+        let result = self.prove_impl();
+        let (challenges, responses, _) = match result.is_ok() {
+            true => result.unwrap(),
+            false => return Err(result.err().unwrap())
+        };
 
-        CompactProof {
+        Ok(CompactProof {
             challenges,
             responses,
-        }
+        })
     }
 
     /// Consume this prover to produce a batchable proof.
-    pub fn prove_batchable(self) -> BatchableProof {
-        let (_, responses, commitments) = self.prove_impl();
+    pub fn prove_batchable(self) -> Result<BatchableProof, ProofError> {
+        let result = self.prove_impl();
+        let (_, responses, commitments) = match result.is_ok() {
+            true => result.unwrap(),
+            false => return Err(result.err().unwrap())
+        };
 
-        BatchableProof {
+        Ok(BatchableProof {
             commitments,
             responses,
-        }
+        })
     }
 }
 
@@ -181,7 +195,7 @@ impl<'a> SchnorrCS for Prover<'a> {
     type ScalarVar = ScalarVar;
     type PointVar = PointVar;
 
-    fn constrain(&mut self, lhs: PointVar, linear_combination: Vec<(ScalarVar, PointVar)>) {
-        self.constraints.push((lhs, linear_combination));
+    fn constrain(&mut self, clause_nr: usize, lhs: PointVar, linear_combination: Vec<(ScalarVar, PointVar)>) {
+        self.constraints.push((clause_nr, lhs, linear_combination));
     }
 }

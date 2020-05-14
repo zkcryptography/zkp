@@ -94,11 +94,13 @@ impl<'a> Verifier<'a> {
 
         // Recompute the prover's commitments based on their claimed challenge value:
         for (index, (lhs_var, rhs_lc)) in self.constraints.iter().enumerate() {
-            let minus_c = -proof.challenges[index];
+            let minus_c = -proof.challenges[index+1];
             let commitment = RistrettoPoint::vartime_multiscalar_mul(
                 rhs_lc
                     .iter()
-                    .map(|(sc_var, _pt_var)| proof.responses[sc_var.0])
+                    .map(|(sc_var, _pt_var)| {
+                        proof.responses[sc_var.0]
+                    })
                     .chain(iter::once(minus_c)),
                 rhs_lc
                     .iter()
@@ -179,7 +181,7 @@ impl<'a> SchnorrCS for Verifier<'a> {
     type ScalarVar = ScalarVar;
     type PointVar = PointVar;
 
-    fn constrain(&mut self, lhs: PointVar, linear_combination: Vec<(ScalarVar, PointVar)>) {
+    fn constrain(&mut self, _clause_nr: usize, lhs: PointVar, linear_combination: Vec<(ScalarVar, PointVar)>) {
         self.constraints.push((lhs, linear_combination));
     }
 }

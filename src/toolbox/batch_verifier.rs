@@ -239,7 +239,7 @@ impl<'a> SchnorrCS for BatchVerifier<'a> {
     type ScalarVar = ScalarVar;
     type PointVar = PointVar;
 
-    fn constrain(&mut self, lhs: PointVar, linear_combination: Vec<(ScalarVar, PointVar)>) {
+    fn constrain(&mut self, _clause_nr: usize, lhs: PointVar, linear_combination: Vec<(ScalarVar, PointVar)>) {
         self.constraints.push((lhs, linear_combination));
     }
 }
