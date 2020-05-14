@@ -13,7 +13,7 @@ use curve25519_dalek::scalar::Scalar;
 /// statement.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct CompactProof {
-    /// The Fiat-Shamir challenge.
+    /// The Fiat-Shamir challenges.
     pub challenges: Vec<Scalar>,
     /// The prover's responses, one per secret variable.
     pub responses: Vec<Scalar>,
@@ -25,6 +25,8 @@ pub struct CompactProof {
 /// secret variables and `n` is the number of statements.
 #[derive(Clone, Serialize, Deserialize)]
 pub struct BatchableProof {
+    /// The Fiat-Shamir challenges.
+    pub challenges: Vec<Scalar>,
     /// Commitments to the prover's blinding factors.
     pub commitments: Vec<CompressedRistretto>,
     /// The prover's responses, one per secret variable.

@@ -143,7 +143,12 @@ impl<'a> Verifier<'a> {
             )?;
         }
 
-        let minus_c = -self.transcript.get_challenge(b"chal");
+        let challenge = self.transcript.get_challenge(b"chal");
+        let rec_challenge = SecretShare::reconstruct(proof.clone().challenges);
+
+        if rec_challenge.is_ok() && challenge != rec_challenge.unwrap() {
+            return Err(ProofError::VerificationFailure);
+        }
 
         let commitments_offset = self.points.len();
         let combined_points = self.points.iter().chain(proof.commitments.iter());
@@ -155,6 +160,7 @@ impl<'a> Verifier<'a> {
         for i in 0..self.constraints.len() {
             let (ref lhs_var, ref rhs_lc) = self.constraints[i];
             let random_factor = Scalar::from(thread_rng().gen::<u128>());
+            let minus_c = -proof.challenges[i+1];
 
             coeffs[commitments_offset + i] += -random_factor;
             coeffs[lhs_var.0] += random_factor * minus_c;

@@ -179,12 +179,13 @@ impl<'a> Prover<'a> {
     /// Consume this prover to produce a batchable proof.
     pub fn prove_batchable(self) -> Result<BatchableProof, ProofError> {
         let result = self.prove_impl();
-        let (_, responses, commitments) = match result.is_ok() {
+        let (challenges, responses, commitments) = match result.is_ok() {
             true => result.unwrap(),
             false => return Err(result.err().unwrap())
         };
 
         Ok(BatchableProof {
+            challenges,
             commitments,
             responses,
         })
