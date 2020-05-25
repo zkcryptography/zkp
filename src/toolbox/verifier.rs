@@ -30,6 +30,7 @@ pub struct Verifier<'a> {
     points: Vec<CompressedRistretto>,
     point_labels: Vec<&'static [u8]>,
     constraints: Vec<(PointVar, Vec<(ScalarVar, PointVar)>)>,
+    subroutines: Vec<Verifier<'a>>,
 }
 
 /// A secret variable used during verification.
@@ -53,6 +54,7 @@ impl<'a> Verifier<'a> {
             points: Vec::default(),
             point_labels: Vec::default(),
             constraints: Vec::default(),
+            subroutines: Vec::default(),
         }
     }
 
@@ -186,8 +188,13 @@ impl<'a> Verifier<'a> {
 impl<'a> SchnorrCS for Verifier<'a> {
     type ScalarVar = ScalarVar;
     type PointVar = PointVar;
+    type SubroutineVar = Verifier<'a>;
 
     fn constrain(&mut self, _clause_nr: usize, lhs: PointVar, linear_combination: Vec<(ScalarVar, PointVar)>) {
         self.constraints.push((lhs, linear_combination));
+    }
+
+    fn add_subroutine(&mut self, subroutine: Verifier<'a>) {
+        self.subroutines.push(subroutine);
     }
 }

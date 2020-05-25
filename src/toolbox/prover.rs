@@ -4,7 +4,7 @@ use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::traits::MultiscalarMul;
 
-use crate::toolbox::{SchnorrCS, TranscriptProtocol};
+use crate::toolbox::{SchnorrCS, TranscriptProtocol, IsSigmaProtocol};
 use crate::{BatchableProof, CompactProof, Transcript, ProofError};
 use crate::toolbox::shamir_secrets::SecretShare;
 use std::iter;
@@ -28,6 +28,16 @@ pub struct Prover<'a> {
     points: Vec<RistrettoPoint>,
     point_labels: Vec<&'static [u8]>,
     constraints: Vec<(usize, PointVar, Vec<(ScalarVar, PointVar)>)>,
+    subroutines: Vec<Prover<'a>>,
+
+    proof: BatchableProof,
+
+    //internals
+    commitments: Vec<CompressedRistretto>,
+    blindings: Vec<Option<Scalar>>,
+    fake_responses: Vec<Option<Scalar>>,
+    known_chal_shares: Vec<Option<Scalar>>,
+    challenge: Scalar,
 }
 
 /// A secret variable used during proving.
@@ -49,6 +59,13 @@ impl<'a> Prover<'a> {
             points: Vec::default(),
             point_labels: Vec::default(),
             constraints: Vec::default(),
+            subroutines: Vec::default(),
+            proof: BatchableProof::default(),
+            commitments: Vec::default(),
+            blindings: Vec::default(),
+            fake_responses: Vec::default(),
+            known_chal_shares: Vec::default(),
+            challenge: Default::default()
         }
     }
 
@@ -76,7 +93,49 @@ impl<'a> Prover<'a> {
     }
 
     /// The compact and batchable proofs differ only by which data they store.
-    fn prove_impl(self) -> Result<(Vec<Scalar>, Vec<Scalar>, Vec<CompressedRistretto>), ProofError> {
+    fn prove_impl(mut self) -> Result<BatchableProof, ProofError> {
+        let result = self.commit();
+        if result.is_err() {
+            return Err(result.err().unwrap());
+        };
+
+        // Obtain a scalar challenge and compute responses
+        self.challenge();
+        self.response();
+        Ok(self.proof)
+    }
+
+    /// Consume this prover to produce a compact proof.
+    pub fn prove_compact(self) -> Result<CompactProof, ProofError> {
+        let result = self.prove_impl();
+        let proof = match result.is_ok() {
+            true => result.unwrap(),
+            false => return Err(result.err().unwrap())
+        };
+
+        Ok(CompactProof {
+            challenges: proof.challenges,
+            responses: proof.responses,
+        })
+    }
+
+    /// Consume this prover to produce a batchable proof.
+    pub fn prove_batchable(self) -> Result<BatchableProof, ProofError> {
+        let result = self.prove_impl();
+        let proof = match result.is_ok() {
+            true => result.unwrap(),
+            false => return Err(result.err().unwrap())
+        };
+
+
+        Ok(proof)
+    }
+}
+
+impl<'a> IsSigmaProtocol for Prover<'a> {
+    type Proof = BatchableProof;
+
+    fn commit(&mut self) -> Result<(), ProofError> {
         // Construct a TranscriptRng
         let mut rng_builder = self.transcript.build_rng();
         for scalar in &self.scalars {
@@ -100,7 +159,7 @@ impl<'a> Prover<'a> {
 
         // Commit to each blinded LHS
         let mut commitments = Vec::with_capacity(self.constraints.len());
-        let mut fakeResponses = Vec::with_capacity(self.constraints.iter().map(|cs| &cs.1).count());
+        let mut fake_responses = Vec::with_capacity(self.constraints.iter().map(|cs| &cs.1).count());
         let mut shares = Vec::with_capacity(self.constraints.len());
         let mut prev_clause_nr = 0;
         for (clause_nr, lhs_var, rhs_lc) in &self.constraints {
@@ -115,7 +174,7 @@ impl<'a> Prover<'a> {
                     shares.push(None);
                     RistrettoPoint::multiscalar_mul(
                         rhs_lc.iter().map(|(sc_var, _pt_var)| {
-                            fakeResponses.push(None);
+                            fake_responses.push(None);
                             blindings[sc_var.0].unwrap()
                         }),
                         rhs_lc.iter().map(|(_sc_var, pt_var)| self.points[pt_var.0]),
@@ -128,7 +187,7 @@ impl<'a> Prover<'a> {
                         rhs_lc.iter()
                             .map(|(_sc_var, _pt_var)| {
                                 let response = Scalar::random(&mut transcript_rng);
-                                fakeResponses.push(Some(response));
+                                fake_responses.push(Some(response));
                                 response
                             })
                             .chain(iter::once(-&challenge)),
@@ -145,12 +204,23 @@ impl<'a> Prover<'a> {
 
             commitments.push(encoding);
         }
+        self.blindings = blindings;
+        self.commitments = commitments;
+        self.fake_responses = fake_responses;
+        self.known_chal_shares = shares;
+        Ok(())
+    }
 
-        // Obtain a scalar challenge and compute responses
-        let challenge = self.transcript.get_challenge(b"chal");
-        let challenges = SecretShare::complete(challenge, &mut shares).unwrap();
+    fn challenge(&mut self) {
+        self.challenge = self.transcript.get_challenge(b"chal")
+    }
+
+    fn response(&mut self) {
+        let challenges = SecretShare::complete(self.challenge, &mut self.known_chal_shares).unwrap();
+        let blindings = &self.blindings;
+        let fake_responses = &self.fake_responses;
         let responses = self.scalars.iter().zip(blindings)
-            .zip(fakeResponses)
+            .zip(fake_responses)
             .zip(&challenges.shares[1..])
             .map(|(scBlResp, ch)| {
                 match scBlResp.1.is_some() {
@@ -159,44 +229,26 @@ impl<'a> Prover<'a> {
                 }
             })
             .collect::<Vec<Scalar>>();
-        Ok((challenges.shares, responses, commitments))
-    }
-
-    /// Consume this prover to produce a compact proof.
-    pub fn prove_compact(self) -> Result<CompactProof, ProofError> {
-        let result = self.prove_impl();
-        let (challenges, responses, _) = match result.is_ok() {
-            true => result.unwrap(),
-            false => return Err(result.err().unwrap())
-        };
-
-        Ok(CompactProof {
-            challenges,
+        let out_shares = challenges.shares;
+        let commitments = self.commitments.clone();
+        self.proof = BatchableProof{
+            challenges: out_shares,
             responses,
-        })
-    }
-
-    /// Consume this prover to produce a batchable proof.
-    pub fn prove_batchable(self) -> Result<BatchableProof, ProofError> {
-        let result = self.prove_impl();
-        let (challenges, responses, commitments) = match result.is_ok() {
-            true => result.unwrap(),
-            false => return Err(result.err().unwrap())
-        };
-
-        Ok(BatchableProof {
-            challenges,
             commitments,
-            responses,
-        })
+        };
     }
 }
 
 impl<'a> SchnorrCS for Prover<'a> {
     type ScalarVar = ScalarVar;
     type PointVar = PointVar;
+    type SubroutineVar = Prover<'a>;
 
     fn constrain(&mut self, clause_nr: usize, lhs: PointVar, linear_combination: Vec<(ScalarVar, PointVar)>) {
         self.constraints.push((clause_nr, lhs, linear_combination));
+    }
+
+    fn add_subroutine(&mut self, subroutine: Prover<'a>) {
+        self.subroutines.push(subroutine);
     }
 }

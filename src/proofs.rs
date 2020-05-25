@@ -23,7 +23,7 @@ pub struct CompactProof {
 ///
 /// This proof has `m+n` 32-byte elements, where `m` is the number of
 /// secret variables and `n` is the number of statements.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 pub struct BatchableProof {
     /// The Fiat-Shamir challenges.
     pub challenges: Vec<Scalar>,
