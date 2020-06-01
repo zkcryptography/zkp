@@ -25,6 +25,17 @@ macro_rules! __compute_formula_constraint {
     };
 }
 
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __parse_subroutine {
+    ( $wrong:tt ) => {
+        Err("Wrong")
+    };
+    ( $subroutine:item ) => {
+        Ok($subroutine)
+    };
+}
+
 /// Creates a module with code required to produce a non-interactive
 /// zero-knowledge proof statement, to serialize it to wire format, to
 /// parse from wire format, and to verify the proof or batch-verify
@@ -72,24 +83,6 @@ macro_rules! __compute_formula_constraint {
 /// variable-time code.
 #[macro_export]
 macro_rules! define_proof {
-    // (
-    //     $proof_module_name:ident // Name of the module to create
-    //     ,
-    //     $proof_label_string:expr // A string literal, used as a domain separator
-    //     ,
-    //     ( $($secret_var:ident),+ ) // Secret variables, sep by commas
-    //     ,
-    //     ( $($instance_var:ident),* ) // Public instance variables, separated by commas
-    //     ,
-    //     ( $($common_var:ident),* ) // Public common variables, separated by commas
-    //     :
-    //     // List of statements to prove
-    //     // Format: LHS = ( ... RHS expr ... ),
-    //     // $($lhs:ident = $statement:tt)&&+
-    //     $($($lhs:ident = $statement:tt)&&+)||*
-    // ) => {
-    //
-    // };
     (
         $proof_module_name:ident // Name of the module to create
         ,
@@ -103,8 +96,7 @@ macro_rules! define_proof {
         :
         // List of statements to prove
         // Format: LHS = ( ... RHS expr ... ),
-        // $($lhs:ident = $statement:tt)&&+
-        $($($lhs:ident = $statement:tt)&&+)||*
+        $($($lhs:tt $(= $statement:tt)?)&&+)||*
     ) => {
         /// An auto-generated Schnorr proof implementation.
         ///
@@ -138,6 +130,7 @@ macro_rules! define_proof {
             /// system API.
             pub mod internal {
                 use $crate::toolbox::SchnorrCS;
+                use $crate::toolbox::IsSigmaProtocol;
 
                 /// The proof label committed to the transcript as a domain separator.
                 pub const PROOF_LABEL: &'static str = $proof_label_string;
@@ -183,14 +176,25 @@ macro_rules! define_proof {
                     //TODO: process ORs differently
                     let mut clause_nr = 1;
                     $($(
-                        cs.constrain(
-                            clause_nr,
-                            publics.$lhs,
-                            __compute_formula_constraint!( (publics, secrets) $statement ),
-                        );
+                        let mut subroutine = true;
+                        $(
+                            subroutine = false;
+                            cs.constrain(
+                                clause_nr,
+                                publics.$lhs,
+                                __compute_formula_constraint!( (publics, secrets) $statement ),
+                            );
+                        )?
+                        if (subroutine) {
+                            let result = __parse_subroutine!($lhs);
+                            if result.is_ok() {
+                                cs.add_subroutine(result.unwrap());
+                            }
+                        }
                     )+
                     clause_nr += 1;
                     )*
+
                 }
             }
 
@@ -399,6 +403,14 @@ macro_rules! define_proof {
                 proof_statement(&mut verifier, secret_vars, public_vars);
 
                 verifier.verify_batchable(proofs)
+            }
+
+            pub fn output_latex_protocol() -> String {
+                "PoK$\\{(x) : A = g^x\\}$".to_string() //TODO: implement!
+            }
+
+            pub fn measure() -> usize {
+                5 //TODO: implement! I guess it's not gonna be usize as output, but some Measurement object
             }
 
             #[cfg(all(feature = "bench", test))]

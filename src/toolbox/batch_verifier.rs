@@ -40,6 +40,7 @@ pub struct BatchVerifier<'a> {
     instance_point_labels: Vec<&'static [u8]>,
 
     constraints: Vec<(PointVar, Vec<(ScalarVar, PointVar)>)>,
+    subroutines: Vec<BatchVerifier<'a>>,
 }
 
 /// A scalar variable used in batch verification.
@@ -84,6 +85,7 @@ impl<'a> BatchVerifier<'a> {
             instance_points: Vec::default(),
             instance_point_labels: Vec::default(),
             constraints: Vec::default(),
+            subroutines: Vec::default(),
         })
     }
 
@@ -238,8 +240,13 @@ impl<'a> BatchVerifier<'a> {
 impl<'a> SchnorrCS for BatchVerifier<'a> {
     type ScalarVar = ScalarVar;
     type PointVar = PointVar;
+    type SubroutineVar = BatchVerifier<'a>;
 
     fn constrain(&mut self, _clause_nr: usize, lhs: PointVar, linear_combination: Vec<(ScalarVar, PointVar)>) {
         self.constraints.push((lhs, linear_combination));
+    }
+
+    fn add_subroutine(&mut self, subroutine: BatchVerifier<'a>) {
+        self.subroutines.push(subroutine);
     }
 }

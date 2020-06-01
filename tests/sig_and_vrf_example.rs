@@ -27,6 +27,8 @@ define_proof! {vrf_proof, "VRF", (x), (A, G, H), (B) : A = (B ^ x) && G = (H ^ x
 define_proof! {test_parsing_no_common, "test_parsing_no_common", (x, y), (A, G, H, B), () : A = (B ^ x * H^y) && G = (H ^ x) && G = (H ^ x) }
 define_proof! {test_parsing_no_pub, "test_parsing_no_pub", (x, y), (), (A, G, H, B) : A = (B ^ x * H^y) && G = (H ^ x) && G = (H ^ x) }
 define_proof! {test_parsing_or, "test_parsing_or", (x, y), (A, G, H), (B) : A = (B ^ x * H^y) && G = (H ^ x) || G = (H ^ x) }
+define_proof! {test_parsing_sub, "sub", (x, y), (A, G, H), (B) : A = (B ^ x * H^y) && G = (H ^ x) || G = (H ^ x) }
+define_proof! {test_parsing_with_sub, "with_sub", (x, y), (A, G, H), (B) : test_parsing_sub && G = (H ^ x) }
 
 /// Defines how the construction interacts with the transcript.
 trait TranscriptProtocol {

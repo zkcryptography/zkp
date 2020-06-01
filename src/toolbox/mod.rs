@@ -91,6 +91,8 @@ pub trait SchnorrCS {
     /// A handle for a point variable in the constraint system.
     type PointVar: Copy;
 
+    type SubroutineVar;
+
     /// Add a constraint of the form `lhs = linear_combination`.
     fn constrain(
         &mut self,
@@ -98,6 +100,16 @@ pub trait SchnorrCS {
         lhs: Self::PointVar,
         linear_combination: Vec<(Self::ScalarVar, Self::PointVar)>,
     );
+
+    fn add_subroutine(&mut self, subroutine: Self::SubroutineVar);
+}
+
+pub trait IsSigmaProtocol {
+    type Proof: Clone;
+
+    fn commit(&mut self) -> Result<(), ProofError>;
+    fn challenge(&mut self);
+    fn response(&mut self);
 }
 
 /// This trait defines the wire format for how the constraint system
