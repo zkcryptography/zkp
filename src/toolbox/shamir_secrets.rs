@@ -131,13 +131,13 @@ impl SecretShare {
             for (j, _) in points.iter().enumerate() {
                 if i == j { continue };
                 let numerator = x - ((j+1) as i64);
-                println!("Numerator: {}", numerator);
+                // println!("Numerator: {}", numerator);
                 let denominator = ((i+1) as i64) - ((j+1) as i64);
-                println!("Denominator: {}", denominator);
+                // println!("Denominator: {}", denominator);
                 coeff *= (numerator as f64) / (denominator as f64);
-                println!("Val: {}", coeff);
+                // println!("Val: {}", coeff);
             };
-            println!("c_{} = {}", i, coeff);
+            // println!("c_{} = {}", i, coeff);
             let coeff = match coeff < 0.0 { 
                 true => -Scalar::from((-coeff) as u64),
                 false => Scalar::from(coeff as u64),
