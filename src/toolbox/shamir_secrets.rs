@@ -69,9 +69,9 @@ fn compare_scalars(a: &Scalar, b: &Scalar) -> Ordering {
 fn calc_polynomial(coefficients: &Vec<Scalar>, x: &Scalar) -> Scalar {
     let mut ret = Scalar::zero();
 
-    for i in 0..coefficients.len() {
+    for (i, coefficient) in coefficients.iter().enumerate() {
         let xp = pow(&x, i);
-        ret += xp * coefficients[i];
+        ret += xp * coefficient;
     };
     ret
 }
