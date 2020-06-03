@@ -2,12 +2,12 @@ use curve25519_dalek::scalar::Scalar;
 use rand::{CryptoRng, RngCore};
 use std::cmp::Ordering;
 
-// A struct holding useful information about a Shamir secret sharing execution.
-//
-// By convention, the shares are encoded as a Vector of singular Scalars.  The x value for each share is its index in
-// the Vector, plus 1.  Thus, if shares[2] = 1990, we are really representing the point (3, 1990).  We do this because
-// in SSS, the point at x = 0 is the secret value, and we want to avoid any chance that someone will leave the secret
-// sitting in the shares object and then pass it somewhere it shouldn't go.
+/// A struct holding useful information about a Shamir secret sharing execution.
+///
+/// By convention, the shares are encoded as a Vector of singular Scalars.  The x value for each share is its index in
+/// the Vector, plus 1.  Thus, if shares[2] = 1990, we are really representing the point (3, 1990).  We do this because
+/// in SSS, the point at x = 0 is the secret value, and we want to avoid any chance that someone will leave the secret
+/// sitting in the shares object and then pass it somewhere it shouldn't go.
 #[derive(Clone)]
 pub struct SecretShare {
     secret: Scalar,
@@ -30,7 +30,7 @@ impl Ord for Share {
 impl PartialOrd for Share {
     // order by x values, then by y values
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let xorder = compare_scalars(&self.x, &other.x); 
+        let xorder = compare_scalars(&self.x, &other.x);
         if xorder == Ordering::Equal {
             return match (self.y, other.y) {
                 (None,    None)    => Some(Ordering::Equal),
@@ -52,7 +52,7 @@ impl PartialEq for Share {
 
 impl Eq for Share {}
 
-// Compare two Scalar values.
+/// Compare two Scalar values.
 fn compare_scalars(a: &Scalar, b: &Scalar) -> Ordering {
     let abytes = a.to_bytes();
     let bbytes = b.to_bytes();
@@ -65,7 +65,7 @@ fn compare_scalars(a: &Scalar, b: &Scalar) -> Ordering {
     return Ordering::Equal;
 }
 
-// Given a set of polynomial coefficients, calculate the value of the polynomial at x.
+/// Given a set of polynomial coefficients, calculate the value of the polynomial at x.
 fn calc_polynomial(coefficients: &Vec<Scalar>, x: &Scalar) -> Scalar {
     let mut ret = Scalar::zero();
 
@@ -76,7 +76,7 @@ fn calc_polynomial(coefficients: &Vec<Scalar>, x: &Scalar) -> Scalar {
     ret
 }
 
-// Raise a Scalar to an arbitrary power.  This code is SUPER dumb: not efficient and not constant-time.
+/// Raise a Scalar to an arbitrary power.  This code is SUPER dumb: not efficient and not constant-time.
 fn pow(x: &Scalar, p: usize) -> Scalar {
     if p == 0 {
         return Scalar::one();
@@ -89,7 +89,7 @@ fn pow(x: &Scalar, p: usize) -> Scalar {
     res
 }
 
-// Perform a Lagrange evaluation assuming the xis are true input x's, NOT off-by-one like SecretShare::shares.
+/// Perform a Lagrange evaluation assuming the xis are true input x's, NOT off-by-one like SecretShare::shares.
 fn evaluate_lagrange(x: Scalar, xis: &Vec<Scalar>, yis: &Vec<Scalar>) -> Result<Scalar, String> {
     if xis.len() != yis.len() {
         return Err(String::from("Lengths of xis and yis are not equal; you've passed invalid points"));
@@ -118,8 +118,8 @@ fn evaluate_lagrange(x: Scalar, xis: &Vec<Scalar>, yis: &Vec<Scalar>) -> Result<
 
 impl SecretShare {
 
-    // Given a secret and some other information, calculate a set of shares using Shamir's Secret Sharing.  We don't
-    // expect this code to ever be called by our application, but it's useful for testing.
+    /// Given a secret and some other information, calculate a set of shares using Shamir's Secret Sharing.  We don't
+    /// expect this code to ever be called by our application, but it's useful for testing.
     pub fn share<R: RngCore + CryptoRng>(secret: &Scalar, nr_of_shares: usize, threshold: usize, rng: &mut R) -> SecretShare {
 
         // first, select random coefficients for each term (less the first) in the polynomial
@@ -142,15 +142,15 @@ impl SecretShare {
         SecretShare {secret: my_secret, shares, threshold}
     }
 
-    // Given some shares and the secret, compute a valid set of additional shares.  Note that the new shares have
-    // NO GUARANTEE of being derived from the same polynomial as the provided ones.  We pick an all-new polynomial
-    // which fits the provided points.  Camenish refers to this function as cmpl_Gamma in his thesis.
-    // 
-    // The sparse_shares vector should follow the "index + 1 = x" convention, but is allowed to contain Option values
-    // to represent missing shares.  DO NOT include the secret in sparse_shares, as it is passed in separately.
+    /// Given some shares and the secret, compute a valid set of additional shares.  Note that the new shares have
+    /// NO GUARANTEE of being derived from the same polynomial as the provided ones.  We pick an all-new polynomial
+    /// which fits the provided points.  Camenish refers to this function as cmpl_Gamma in his thesis.
+    ///
+    /// The sparse_shares vector should follow the "index + 1 = x" convention, but is allowed to contain Option values
+    /// to represent missing shares.  DO NOT include the secret in sparse_shares, as it is passed in separately.
     pub fn complete<R: CryptoRng + RngCore>(secret: Scalar, threshold: usize, sparse_shares: &Vec<Option<Scalar>>, rng: &mut R) -> Result<SecretShare, String> {
-        
-        // Set up our data structures for later reference.  Initially, `empties` will contain all of the shares with 
+
+        // Set up our data structures for later reference.  Initially, `empties` will contain all of the shares with
         // y = None, and `points` has all the points with Some.  As we go, we'll build up `points` even more by taking
         // from `empties`.
         let mut empties: Vec<Share> = Vec::new();
@@ -215,7 +215,7 @@ impl SecretShare {
         })
     }
 
-    // Given enough shares, output the secret
+    /// Given enough shares, output the secret.
     pub fn reconstruct(threshold: usize, shares: Vec<Scalar>) -> Result<Scalar, String> {
         if threshold > shares.len() {
             return Err(String::from("Not enough shares to meet the threshold"));
