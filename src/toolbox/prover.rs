@@ -217,7 +217,9 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
     }
 
     fn response(&mut self) {
-        let challenges = SecretShare::complete(self.challenge, &mut self.known_chal_shares).unwrap();
+        let mut rng = rand::thread_rng();
+
+        let challenges = SecretShare::complete(self.challenge, 0, &mut self.known_chal_shares, &mut rng).unwrap();
         let blindings = &self.blindings;
         let fake_responses = &self.fake_responses;
         let responses = self.scalars.iter().zip(blindings)
