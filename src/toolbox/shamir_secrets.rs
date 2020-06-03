@@ -16,7 +16,7 @@ pub struct SecretShare {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub struct Share {
+struct Share {
     x: Scalar,
     y: Option<Scalar>,
 }
@@ -56,7 +56,7 @@ impl Eq for Share {}
 fn compare_scalars(a: &Scalar, b: &Scalar) -> Ordering {
     let abytes = a.to_bytes();
     let bbytes = b.to_bytes();
-    for i in 0..32 {
+    for i in 0..abytes.len() {
         let o: Ordering = abytes[i].cmp(&bbytes[i]);
         if o != Ordering::Equal {
             return o;
@@ -90,7 +90,11 @@ fn pow(x: &Scalar, p: usize) -> Scalar {
 }
 
 // Perform a Lagrange evaluation assuming the xis are true input x's, NOT off-by-one like SecretShare::shares.
-fn evaluate_lagrange(x: Scalar, xis: &Vec<Scalar>, yis: &Vec<Scalar>) -> Scalar {
+fn evaluate_lagrange(x: Scalar, xis: &Vec<Scalar>, yis: &Vec<Scalar>) -> Result<Scalar, String> {
+    if xis.len() != yis.len() {
+        return Err(String::from("Lengths of xis and yis are not equal; you've passed invalid points"));
+    }
+
     let mut sum = Scalar::zero();
 
     for (x_i, y_i) in xis.iter().zip(yis.iter()) {
@@ -102,14 +106,14 @@ fn evaluate_lagrange(x: Scalar, xis: &Vec<Scalar>, yis: &Vec<Scalar>) -> Scalar 
             let numerator = x - x_j;
             term_i *= numerator;
 
-            // then multiply by the inverse of the denominator
+            // then divide by the denominator (multiply by the inverse, since Scalar doesn't support .Div)
             let denominator = (x_i - x_j).invert();
             term_i *= denominator;
         };
 
         sum += term_i;
     };
-    sum
+    Ok(sum)
 }
 
 impl SecretShare {
@@ -145,29 +149,31 @@ impl SecretShare {
     // The sparse_shares vector should follow the "index + 1 = x" convention, but is allowed to contain Option values
     // to represent missing shares.  DO NOT include the secret in sparse_shares, as it is passed in separately.
     pub fn complete<R: CryptoRng + RngCore>(secret: Scalar, threshold: usize, sparse_shares: &Vec<Option<Scalar>>, rng: &mut R) -> Result<SecretShare, String> {
-        let mut nr_of_shares = 0;
+        
+        // Set up our data structures for later reference.  Initially, `empties` will contain all of the shares with 
+        // y = None, and `points` has all the points with Some.  As we go, we'll build up `points` even more by taking
+        // from `empties`.
+        let mut empties: Vec<Share> = Vec::new();
         let mut points: Vec<Share> = Vec::new();
-        for (xi, share) in sparse_shares.iter().enumerate() {
+        points.push(Share { x: Scalar::zero(), y: Some(secret) } );
+
+        for (xi, share) in sparse_shares.iter().enumerate() {               // 1. full loop over sparse_shares, size N
             let x = Scalar::from((xi + 1) as u64);
             let mut s = Share {x, y: None};
             if share.is_some() {
-                nr_of_shares += 1;
-                s.y = share.clone()
-            };
-            points.push(s);
+                s.y = share.clone();
+                points.push(s);
+            } else {
+                empties.push(s);
+            }
         }
-        points.insert(0, Share { x: Scalar::zero(), y: Some(secret) } );
-
-        // at this point, `empties` contains all of the points with None, and `points` has all the points with Some
-        // we'll build `points` up even more by taking from `empties`
-        let mut empties: Vec<Share> = points.iter().filter(|s| s.y.is_none()).cloned().collect();
-        let mut points: Vec<Share> = points.iter().filter(|s| s.y.is_some()).cloned().collect();
 
         // STEP ONE: if the total number of points we have (sparse_shares + secret) is < threshold, we need to generate
         // random points to fill in the gaps.
+        let nr_of_shares = points.len() - 1;
         if (nr_of_shares+1) < threshold {
             let remaining = threshold - nr_of_shares;
-            for _ in 0..remaining {
+            for _ in 0..remaining {                                         // 2a. partial loop over empties, size t-N.is_some()
                 if let Some(mut share) = empties.pop() {
                     let yi = Scalar::random(rng);    // TODO I believe in normal usage this should be the PRNG from the transcript, so we always generate the same "random" challenges?
                     share.y = Some(yi);
@@ -176,31 +182,32 @@ impl SecretShare {
             }
         }
 
-        let (xis, yis): (Vec<Scalar>, Vec<Scalar>) = points.iter().map(|share| (share.x, share.y.unwrap())).unzip();
+        let (xis, yis): (Vec<Scalar>, Vec<Scalar>) = points.iter().map(|share| (share.x, share.y.unwrap())).unzip();        // 3. full loop over points, size max(t, N.is_some())
         let xis: Vec<Scalar> = xis[0..threshold].to_vec();
         let yis: Vec<Scalar> = yis[0..threshold].to_vec();
 
         // STEP TWO: if we were given more than enough points, verify the extras are on the line.  In this case, none
         // of the points have been randomly generated by us.
         if (nr_of_shares+1) >= threshold {
-            for point in points[threshold..].to_vec() {
+            for point in points[threshold..].to_vec() {                     // 2b. partial loop over points, size N.is_some() - threshold (basically, all the extra filled-inshares we got).  Only executes if 2a DIDN'T fire
                 let yi = evaluate_lagrange(point.x, &xis, &yis);
-                if yi != point.y.unwrap() {
+                if yi.unwrap() != point.y.unwrap() {
                     return Err(format!("Extraneous point {:?} is not on the line!", point));
                 }
             }
         }
 
         // STEP THREE: if we have any remaining empty spots, we can Lagrange-calculate their values
-        for mut share in empties.pop() {
-            let yi = evaluate_lagrange(share.x, &xis, &yis);
-            share.y = Some(yi);
-            points.push(share);
+        for mut share in empties.pop() {                                    // 4. full loop over the REMAINING entries in empties, size N.is_none() - (N.is_some() - threshold)
+            if let Ok(yi) = evaluate_lagrange(share.x, &xis, &yis) {
+                share.y = Some(yi);
+                points.push(share);
+            }
         }
 
         let mut new_shares = points[1..].to_vec();
-        new_shares.sort();
-        let new_shares = new_shares.iter().map(|n| n.y.unwrap()).collect();
+        new_shares.sort();                                                  // 5. multi-loop over new_shares, size N log N
+        let new_shares = new_shares.iter().map(|n| n.y.unwrap()).collect(); // 6. full loop over new_shares, size N
         Ok(SecretShare {
             secret,
             shares: new_shares,
@@ -214,52 +221,27 @@ impl SecretShare {
             return Err(String::from("Not enough shares to meet the threshold"));
         }
 
-        // From Handbook of Applied Cryptography, 12.71:
-        //     S = sum(i=1..t){c_i*y_i}, where c_i = TT(j=1..t, j!=i){x_j / (x_j - x_i)}
-        let mut sum: Scalar = Scalar::zero();
-
-        // we use the first set of shares to reconstruct the secret
-        for i in 0..threshold {
-            let y_i = shares[i];
-
-            let mut c_i = 1f64;
-
-            for j in 0..threshold {
-                if i == j { continue; }
-                c_i *= ((j+1) as f64) / ((j+1) as f64 - (i+1) as f64);
-            }
-
-            // The From trait on Scalar only supports unsigned numerical types, so we have to kinda hack this
-            let c_i = match c_i < 0.0 {
-                true => -Scalar::from((-c_i) as u64),
-                false => Scalar::from(c_i as u64),
-            };
-
-            let delta = c_i * y_i;
-            sum += delta;
-        }
-
-        let mut xis: Vec<Scalar> = Vec::new();
-        for i in 1..(threshold+1) {
-            xis.push(Scalar::from(i as u64));
-        }
+        let xis: Vec<Scalar> = (1..(threshold+1)).map(|i| Scalar::from(i as u64)).collect();
         let yis = shares[0..threshold].to_vec();
+
+        let secret = evaluate_lagrange(Scalar::zero(), &xis, &yis);
 
         // we use the remaining shares to do validation, and make sure ALL the points line up
         for i in threshold..shares.len() {
             let y_i = shares[i];
 
             let y_maybe = evaluate_lagrange(Scalar::from((i+1) as u64), &xis, &yis);
-            if let false = y_i == y_maybe {
+            if let false = y_i == y_maybe.unwrap() {
                 return Err(String::from("Not all values fit into reconstruction"));
             };
         };
 
-        return Ok(sum);
+        return secret;
     }
 }
 
 mod tests {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]
@@ -393,16 +375,16 @@ mod tests {
     fn shamir_eval_lagrange_easy() {
         let xis = vec![Scalar::from(1u32), Scalar::from(2u32), Scalar::from(3u32)];
         let yis = vec![Scalar::from(272u32), Scalar::from(935u32), Scalar::from(1990u32)];
-        assert_eq!(Scalar::one(), evaluate_lagrange(Scalar::zero(), &xis, &yis));
-        assert_eq!(Scalar::from(7507u32), evaluate_lagrange(Scalar::from(6u32), &xis, &yis));
+        assert_eq!(Scalar::one(), evaluate_lagrange(Scalar::zero(), &xis, &yis).unwrap());
+        assert_eq!(Scalar::from(7507u32), evaluate_lagrange(Scalar::from(6u32), &xis, &yis).unwrap());
     }
 
     #[test]
     fn shamir_eval_lagrange_hole() {
         let xis = vec![Scalar::from(0u32), Scalar::from(1u32), Scalar::from(3u32)];
         let yis = vec![Scalar::one(), Scalar::from(272u32), Scalar::from(1990u32)];
-        assert_eq!(Scalar::from(935u32), evaluate_lagrange(Scalar::from(2u32), &xis, &yis));
-        assert_eq!(Scalar::from(7507u32), evaluate_lagrange(Scalar::from(6u32), &xis, &yis));
+        assert_eq!(Scalar::from(935u32), evaluate_lagrange(Scalar::from(2u32), &xis, &yis).unwrap());
+        assert_eq!(Scalar::from(7507u32), evaluate_lagrange(Scalar::from(6u32), &xis, &yis).unwrap());
     }
 
     #[test]
