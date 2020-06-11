@@ -71,8 +71,8 @@ macro_rules! __parse_subroutine {
 ///
 /// Statements have the form `LHS = (A ^ x * B ^ y * C ^ z * ... )`,
 /// where `LHS` is one of the points listed as a public parameter, and
-/// the right-hand side is a sum of public points multiplied by secret
-/// scalars.
+/// the right-hand side is a product of public points raised to the power of
+/// some secret scalars.
 ///
 /// Points which have the same assignment for all instances of the
 /// proof statement (for instance, a basepoint) should be specified as

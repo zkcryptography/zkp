@@ -116,7 +116,9 @@ impl<'a> Verifier<'a> {
 
         // Recompute the challenge and check if it's the claimed one
         let challenge = self.transcript.get_challenge(b"chal");
-        let rec_challenge = SecretShare::reconstruct(proof.clone().challenges);
+        
+        // TODO this definitely should not be zero
+        let rec_challenge = SecretShare::reconstruct(0, proof.clone().challenges);
 
         if rec_challenge.is_ok() && challenge == rec_challenge.unwrap() {
             Ok(())
@@ -146,7 +148,9 @@ impl<'a> Verifier<'a> {
         }
 
         let challenge = self.transcript.get_challenge(b"chal");
-        let rec_challenge = SecretShare::reconstruct(proof.clone().challenges);
+
+        // TODO this definitely should not be zero
+        let rec_challenge = SecretShare::reconstruct(0, proof.clone().challenges);
 
         if rec_challenge.is_ok() && challenge != rec_challenge.unwrap() {
             return Err(ProofError::VerificationFailure);

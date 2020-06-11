@@ -162,9 +162,10 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         let mut fake_responses = Vec::with_capacity(self.constraints.iter().map(|cs| &cs.1).count());
         let mut shares = Vec::with_capacity(self.constraints.len());
         let mut prev_clause_nr = 0;
-        for (clause_nr, lhs_var, rhs_lc) in &self.constraints {
-            let commitment = match blindings[(rhs_lc[0].0).0].is_some() {
-                true => {
+        for (clause_nr, lhs_var, rhs_lin_combo) in &self.constraints {
+            let sv_index = (rhs_lin_combo[0].0).0;
+            let commitment = match blindings[sv_index].is_some() {
+                true => {               // if we have a blinding, that means we have a secret value for this variable
                     if prev_clause_nr == 0 {
                         prev_clause_nr = *clause_nr;
                     }
@@ -173,25 +174,25 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
                     }
                     shares.push(None);
                     RistrettoPoint::multiscalar_mul(
-                        rhs_lc.iter().map(|(sc_var, _pt_var)| {
+                        rhs_lin_combo.iter().map(|(sc_var, _pt_var)| {
                             fake_responses.push(None);
                             blindings[sc_var.0].unwrap()
                         }),
-                        rhs_lc.iter().map(|(_sc_var, pt_var)| self.points[pt_var.0]),
+                        rhs_lin_combo.iter().map(|(_sc_var, pt_var)| self.points[pt_var.0]),
                     )
                 }
-                false => {
+                false => {              // if we don't have a blinding, we don't have a secret value and will be faking one
                     let challenge = Scalar::random(&mut transcript_rng);
                     shares.push(Some(challenge));
                     RistrettoPoint::multiscalar_mul(
-                        rhs_lc.iter()
+                        rhs_lin_combo.iter()
                             .map(|(_sc_var, _pt_var)| {
                                 let response = Scalar::random(&mut transcript_rng);
                                 fake_responses.push(Some(response));
                                 response
                             })
                             .chain(iter::once(-&challenge)),
-                        rhs_lc.iter()
+                        rhs_lin_combo.iter()
                             .map(|(_sc_var, pt_var)| self.points[pt_var.0])
                             .chain(iter::once(self.points[lhs_var.0])),
                     )
@@ -216,7 +217,9 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
     }
 
     fn response(&mut self) {
-        let challenges = SecretShare::complete(self.challenge, &mut self.known_chal_shares).unwrap();
+        let mut rng = rand::thread_rng();
+
+        let challenges = SecretShare::complete(self.challenge, 0, &mut self.known_chal_shares, &mut rng).unwrap();
         let blindings = &self.blindings;
         let fake_responses = &self.fake_responses;
         let responses = self.scalars.iter().zip(blindings)
