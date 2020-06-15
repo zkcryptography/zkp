@@ -69,7 +69,7 @@ impl<'a> Prover<'a> {
         }
     }
 
-    /// Allocate and assign a secret variable with the given `label`.
+    /// Allocate and assign a secret variable with the given `label`.  It returns the index of this new ScalarVar in the scalars Vector.
     pub fn allocate_scalar(&mut self, label: &'static [u8], assignment: Option<Scalar>) -> ScalarVar {
         self.transcript.append_scalar_var(label);
         self.scalars.push(assignment);
@@ -163,6 +163,12 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         let mut shares = Vec::with_capacity(self.constraints.len());
         let mut prev_clause_nr = 0;
         for (clause_nr, lhs_var, rhs_lin_combo) in &self.constraints {
+
+            // The first [0] picks the first entry in the linear combination.  We can test against only this one because we
+            // know that all entries in a compound && clause (represented by a single constraint) MUST either be all known, or
+            // all unknown.  Though, we should have a way of checking this in the code before execution reaches this point.
+            // The second .0 pulls out the ScalarVar which the PointVar is to be raised to.  The third .0 selects the single entry
+            // of the ScalarVar tuple, which is a usize representing the index of the ScalarVar's value in self.scalars and self.blindings.
             let sv_index = (rhs_lin_combo[0].0).0;
             let commitment = match blindings[sv_index].is_some() {
                 true => {               // if we have a blinding, that means we have a secret value for this variable
@@ -173,13 +179,18 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
                         return Err(ProofError::InputMismatch);
                     }
                     shares.push(None);
-                    RistrettoPoint::multiscalar_mul(
+                    let c = RistrettoPoint::multiscalar_mul(
                         rhs_lin_combo.iter().map(|(sc_var, _pt_var)| {
                             fake_responses.push(None);
                             blindings[sc_var.0].unwrap()
                         }),
-                        rhs_lin_combo.iter().map(|(_sc_var, pt_var)| self.points[pt_var.0]),
-                    )
+                        rhs_lin_combo.iter().map(|(_sc_var, pt_var)| {
+                            // println!("G: {:?}", self.points[pt_var.0].compress());
+                            self.points[pt_var.0]
+                        }),
+                    );
+                    // println!("c = {:?}", c.compress());
+                    c
                 }
                 false => {              // if we don't have a blinding, we don't have a secret value and will be faking one
                     let challenge = Scalar::random(&mut transcript_rng);
@@ -217,22 +228,32 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
     }
 
     fn response(&mut self) {
-        let mut rng = rand::thread_rng();
+        // Construct a TranscriptRng
+        let mut rng_builder = self.transcript.build_rng();
+        for scalar in &self.scalars {
+            if scalar.is_some() {
+                rng_builder = rng_builder.rekey_with_witness_bytes(b"", scalar.unwrap().as_bytes());
+            }
+        }
+        let mut transcript_rng = rng_builder.finalize(&mut thread_rng());
 
-        let challenges = SecretShare::complete(self.challenge, 0, &mut self.known_chal_shares, &mut rng).unwrap();
+        // threshold shouldn't be fake_responses.len(); it should be the number of fake_responses which are Some()
+        // we also have to add one to account for having the secret itself
+        let threshold = 1 + self.fake_responses.iter().filter(|r| r.is_some()).collect::<Vec<&Option<Scalar>>>().len();
+        let challenges = SecretShare::complete(self.challenge, threshold, &mut self.known_chal_shares, &mut transcript_rng).unwrap();
         let blindings = &self.blindings;
         let fake_responses = &self.fake_responses;
         let responses = self.scalars.iter().zip(blindings)
             .zip(fake_responses)
-            .zip(&challenges.shares[1..])
-            .map(|(scBlResp, ch)| {
-                match scBlResp.1.is_some() {
-                    true => scBlResp.1.unwrap(),
-                    false => (scBlResp.0).0.unwrap() * ch + (scBlResp.0).1.unwrap()
+            .zip(&challenges.shares)
+            .map(| (((scalar, blinding), fake_response), challenge) | {
+                match fake_response.is_some() {
+                    true => fake_response.unwrap(),
+                    false => scalar.unwrap() * challenge.unwrap() + blinding.unwrap(),
                 }
             })
             .collect::<Vec<Scalar>>();
-        let out_shares = challenges.shares;
+        let out_shares = challenges.shares.iter().map(|s| s.unwrap()).collect();
         let commitments = self.commitments.clone();
         self.proof = BatchableProof{
             challenges: out_shares,

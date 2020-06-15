@@ -96,7 +96,7 @@ impl<'a> Verifier<'a> {
 
         // Recompute the prover's commitments based on their claimed challenge value:
         for (index, (lhs_var, rhs_lc)) in self.constraints.iter().enumerate() {
-            let minus_c = -proof.challenges[index+1];
+            let minus_c = -proof.challenges[index];
             let commitment = RistrettoPoint::vartime_multiscalar_mul(
                 rhs_lc
                     .iter()
@@ -116,9 +116,14 @@ impl<'a> Verifier<'a> {
 
         // Recompute the challenge and check if it's the claimed one
         let challenge = self.transcript.get_challenge(b"chal");
-        
-        // TODO this definitely should not be zero
-        let rec_challenge = SecretShare::reconstruct(0, proof.clone().challenges);
+
+        // println!("Transcript challenge: {:?}", challenge);
+
+        let shares = proof.challenges.clone().iter().map(|c| Some(*c)).collect();
+        let threshold = (self.constraints.len() - 1) * self.constraints[0].1.len();
+        let rec_challenge = SecretShare::reconstruct(threshold, shares);
+
+        // println!("Reconstructed challenge: {:?}", rec_challenge);
 
         if rec_challenge.is_ok() && challenge == rec_challenge.unwrap() {
             Ok(())
@@ -149,8 +154,9 @@ impl<'a> Verifier<'a> {
 
         let challenge = self.transcript.get_challenge(b"chal");
 
-        // TODO this definitely should not be zero
-        let rec_challenge = SecretShare::reconstruct(0, proof.clone().challenges);
+        let shares = proof.challenges.clone().iter().map(|c| Some(*c)).collect();
+        let threshold = (self.constraints.len() - 1) * self.constraints[0].1.len();
+        let rec_challenge = SecretShare::reconstruct(threshold, shares);
 
         if rec_challenge.is_ok() && challenge != rec_challenge.unwrap() {
             return Err(ProofError::VerificationFailure);

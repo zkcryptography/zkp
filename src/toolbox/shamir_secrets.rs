@@ -1,6 +1,7 @@
 use curve25519_dalek::scalar::Scalar;
 use rand::{CryptoRng, RngCore};
 use std::cmp::Ordering;
+use std::cmp::max;
 
 /// A struct holding useful information about a Shamir secret sharing execution.
 ///
@@ -11,7 +12,9 @@ use std::cmp::Ordering;
 #[derive(Clone)]
 pub struct SecretShare {
     secret: Scalar,
-    pub shares: Vec<Scalar>,
+
+    /// A Vector of y-values for share points.  The corresponding x values are 1 + the vector index.
+    pub shares: Vec<Option<Scalar>>,
     threshold: usize,
 }
 
@@ -132,11 +135,11 @@ impl SecretShare {
 
         // now, calculate points on the line as our shares.
         // we encode the x value as the index of the vec
-        let mut shares: Vec<Scalar> = Vec::new();
+        let mut shares: Vec<Option<Scalar>> = Vec::new();
         for i in 0..nr_of_shares {
             let x = Scalar::from((i+1) as u64);
             let y = calc_polynomial(&coefficients, &x);
-            shares.push(y);
+            shares.push(Some(y));
         }
 
         SecretShare {secret: my_secret, shares, threshold}
@@ -148,7 +151,26 @@ impl SecretShare {
     ///
     /// The sparse_shares vector should follow the "index + 1 = x" convention, but is allowed to contain Option values
     /// to represent missing shares.  DO NOT include the secret in sparse_shares, as it is passed in separately.
+    /// 
+    /// Corner cases:  need sanity checks on threshold and size of sparse_shares
+    /// The size of the vector we return is going to need to match the size of sparse_shares.  Do our shares match the is_some indices, or the is_none indices?
     pub fn complete<R: CryptoRng + RngCore>(secret: Scalar, threshold: usize, sparse_shares: &Vec<Option<Scalar>>, rng: &mut R) -> Result<SecretShare, String> {
+        // println!("Asked to complete SSS with threshold {} and sparse_shares {:?}", threshold, sparse_shares);
+        if threshold == 0 {
+            // Threshold of 0 means there are no unknowns in our proof.  In that case, we share just the "secret" itself
+            return Ok(SecretShare {
+                secret,
+                shares: vec![Some(secret); sparse_shares.len()],
+                threshold,
+            })
+        } else if threshold == 1 {
+            // the only possible share is the secret itself; I think we hand back nothing?
+            return Ok(SecretShare {
+                secret,
+                shares: sparse_shares.clone(),
+                threshold,
+            })
+        }
 
         // Set up our data structures for later reference.  Initially, `empties` will contain all of the shares with
         // y = None, and `points` has all the points with Some.  As we go, we'll build up `points` even more by taking
@@ -207,7 +229,7 @@ impl SecretShare {
 
         let mut new_shares = points[1..].to_vec();
         new_shares.sort();                                                  // 5. multi-loop over new_shares, size N log N
-        let new_shares = new_shares.iter().map(|n| n.y.unwrap()).collect(); // 6. full loop over new_shares, size N
+        let new_shares = new_shares.iter().map(|n| n.y).collect();          // 6. full loop over new_shares, size N
         Ok(SecretShare {
             secret,
             shares: new_shares,
@@ -216,21 +238,32 @@ impl SecretShare {
     }
 
     /// Given enough shares, output the secret.
-    pub fn reconstruct(threshold: usize, shares: Vec<Scalar>) -> Result<Scalar, String> {
-        if threshold > shares.len() {
+    pub fn reconstruct(threshold: usize, sparse_shares: Vec<Option<Scalar>>) -> Result<Scalar, String> {
+        let num_shares = sparse_shares.iter().filter(|s| s.is_some()).collect::<Vec<&Option<Scalar>>>().len();
+        if threshold > num_shares {
             return Err(String::from("Not enough shares to meet the threshold"));
         }
 
-        let xis: Vec<Scalar> = (1..(threshold+1)).map(|i| Scalar::from(i as u64)).collect();
-        let yis = shares[0..threshold].to_vec();
+        // println!("Reconstructing from {} shares with t = {}", num_shares, threshold);
+        // println!("Reconstructing with shares {:?}", sparse_shares);
 
-        let secret = evaluate_lagrange(Scalar::zero(), &xis, &yis);
+        let mut xis: Vec<Scalar> = Vec::new();
+        let mut yis: Vec<Scalar> = Vec::new();
+        for (i, s) in sparse_shares.iter().enumerate() {
+            if s.is_some() {
+                xis.push(Scalar::from((i as u32) + 1));
+                yis.push(s.unwrap());
+            }
+        }
 
+        let actual_threshold = max(1, threshold);
+        let secret = evaluate_lagrange(Scalar::zero(), &xis[0..actual_threshold].to_vec(), &yis[0..actual_threshold].to_vec());
+        // println!("Reconstructed secret: {:?}", secret);
         // we use the remaining shares to do validation, and make sure ALL the points line up
-        for i in threshold..shares.len() {
-            let y_i = shares[i];
+        for i in actual_threshold..xis.len() {
+            let y_i = yis[i];
 
-            let y_maybe = evaluate_lagrange(Scalar::from((i+1) as u64), &xis, &yis);
+            let y_maybe = evaluate_lagrange(xis[i], &xis[0..actual_threshold].to_vec(), &yis[0..actual_threshold].to_vec());
             if let false = y_i == y_maybe.unwrap() {
                 return Err(String::from("Not all values fit into reconstruction"));
             };
@@ -303,7 +336,7 @@ mod tests {
 
     #[test]
     fn shamir_reconstruct_bad_threshold() {
-        let shares = vec![Scalar::from(272u32), Scalar::from(935u32), Scalar::from(1990u32)];
+        let shares = vec![Some(Scalar::from(272u32)), Some(Scalar::from(935u32)), Some(Scalar::from(1990u32))];
         match SecretShare::reconstruct(4, shares) {
             Ok(_) => assert!(false, "Should not have been able to reconstruct!"),
             Err(e) => assert!(e.contains("Not enough shares")),
@@ -313,7 +346,7 @@ mod tests {
     #[test]
     fn shamir_reconstruct_easy() {
         let secret = Scalar::one();
-        let shares = vec![Scalar::from(272u32), Scalar::from(935u32), Scalar::from(1990u32)];
+        let shares = vec![Some(Scalar::from(272u32)), Some(Scalar::from(935u32)), Some(Scalar::from(1990u32))];
         let r1 = SecretShare::reconstruct(shares.len(), shares).unwrap();
         assert_eq!(secret, r1);
     }
@@ -321,7 +354,7 @@ mod tests {
     #[test]
     fn shamir_reconstruct_easy_with_leftovers() {
         let secret = Scalar::one();
-        let shares = vec![Scalar::from(272u32), Scalar::from(935u32), Scalar::from(1990u32), Scalar::from(3437u32)];
+        let shares = vec![Some(Scalar::from(272u32)), Some(Scalar::from(935u32)), Some(Scalar::from(1990u32)), Some(Scalar::from(3437u32))];
         let r1 = SecretShare::reconstruct(3, shares).unwrap();
         assert_eq!(secret, r1);
     }
@@ -352,7 +385,7 @@ mod tests {
     #[test]
     fn shamir_reconstruct_bad_leftovers() {
         // the fourth point should be 3437 for proper reconstruction; altering it should cause failure
-        let shares = vec![Scalar::from(272u32), Scalar::from(935u32), Scalar::from(1990u32), Scalar::from(3436u32)];
+        let shares = vec![Some(Scalar::from(272u32)), Some(Scalar::from(935u32)), Some(Scalar::from(1990u32)), Some(Scalar::from(3436u32))];
         match SecretShare::reconstruct(3, shares) {
             Err(e) => assert!(e.contains("Not all values fit into reconstruction")),
             Ok(_) => assert!(false, "Should not have been able to reconstruct!"),
@@ -364,7 +397,7 @@ mod tests {
         let mut rng = rand::thread_rng();
         let secret = Scalar::random(&mut rng);
         let mut obj = SecretShare::share(&secret, 20, 10, &mut rng);
-        obj.shares[5] = if obj.shares[5] == Scalar::one() { Scalar::zero() } else { Scalar::one() };
+        obj.shares[5] = if obj.shares[5].unwrap() == Scalar::one() { Some(Scalar::zero()) } else { Some(Scalar::one()) };
         match SecretShare::reconstruct(10, obj.shares) {
             Err(e) => assert!(e.contains("Not all values fit into reconstruction")),
             Ok(_) => assert!(false, "Should not have been able to reconstruct!"),
