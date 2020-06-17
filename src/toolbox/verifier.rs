@@ -7,7 +7,8 @@ use curve25519_dalek::traits::{IsIdentity, VartimeMultiscalarMul};
 
 use crate::toolbox::{SchnorrCS, TranscriptProtocol};
 use crate::{BatchableProof, CompactProof, ProofError, Transcript};
-use crate::toolbox::shamir_secrets::SecretShare;
+use crate::toolbox::shamir::Shamir;
+use crate::toolbox::secrets::SecretSharing;
 
 /// Used to produce verification results.
 ///
@@ -83,7 +84,7 @@ impl<'a> Verifier<'a> {
     pub fn verify_compact(self, proof: &CompactProof) -> Result<(), ProofError> {
         // Check that there are as many responses as secret variables
         if proof.responses.len() != self.num_scalars {
-            return Err(ProofError::VerificationFailure);
+            return Err(ProofError::IncorrectResponseNumber);
         }
 
         // Decompress all parameters or fail verification.
@@ -92,7 +93,7 @@ impl<'a> Verifier<'a> {
             .iter()
             .map(|pt| pt.decompress())
             .collect::<Option<Vec<RistrettoPoint>>>()
-            .ok_or(ProofError::VerificationFailure)?;
+            .ok_or(ProofError::DecompressionError)?;
 
         // Recompute the prover's commitments based on their claimed challenge value:
         for (index, (lhs_var, rhs_lc)) in self.constraints.iter().enumerate() {
@@ -117,13 +118,12 @@ impl<'a> Verifier<'a> {
         // Recompute the challenge and check if it's the claimed one
         let challenge = self.transcript.get_challenge(b"chal");
 
-        // println!("Transcript challenge: {:?}", challenge);
-
         let shares = proof.challenges.clone().iter().map(|c| Some(*c)).collect();
-        let threshold = (self.constraints.len() - 1) * self.constraints[0].1.len();
-        let rec_challenge = SecretShare::reconstruct(threshold, shares);
 
-        // println!("Reconstructed challenge: {:?}", rec_challenge);
+        // threshold is the number of public keys NOT in the known signature group, plus at least one in the known signature group
+        let threshold = (self.constraints.len() - 1) * self.constraints[0].1.len() + 1;
+        let mut sham = Shamir::new_without_rng(threshold);
+        let rec_challenge = sham.reconstruct(&shares);
 
         if rec_challenge.is_ok() && challenge == rec_challenge.unwrap() {
             Ok(())
@@ -136,7 +136,7 @@ impl<'a> Verifier<'a> {
     pub fn verify_batchable(self, proof: &BatchableProof) -> Result<(), ProofError> {
         // Check that there are as many responses as secret variables
         if proof.responses.len() != self.num_scalars {
-            return Err(ProofError::VerificationFailure);
+            return Err(ProofError::IncorrectResponseNumber);
         }
         // Check that there are as many commitments as constraints
         if proof.commitments.len() != self.constraints.len() {
@@ -155,8 +155,11 @@ impl<'a> Verifier<'a> {
         let challenge = self.transcript.get_challenge(b"chal");
 
         let shares = proof.challenges.clone().iter().map(|c| Some(*c)).collect();
-        let threshold = (self.constraints.len() - 1) * self.constraints[0].1.len();
-        let rec_challenge = SecretShare::reconstruct(threshold, shares);
+
+        // threshold is the number of public keys NOT in the known signature group, plus at least one in the known signature group
+        let threshold = (self.constraints.len() - 1) * self.constraints[0].1.len() + 1;
+        let mut sham = Shamir::new_without_rng(threshold);
+        let rec_challenge = sham.reconstruct(&shares);
 
         if rec_challenge.is_ok() && challenge != rec_challenge.unwrap() {
             return Err(ProofError::VerificationFailure);
@@ -172,7 +175,7 @@ impl<'a> Verifier<'a> {
         for i in 0..self.constraints.len() {
             let (ref lhs_var, ref rhs_lc) = self.constraints[i];
             let random_factor = Scalar::from(thread_rng().gen::<u128>());
-            let minus_c = -proof.challenges[i+1];
+            let minus_c = -proof.challenges[i];
 
             coeffs[commitments_offset + i] += -random_factor;
             coeffs[lhs_var.0] += random_factor * minus_c;

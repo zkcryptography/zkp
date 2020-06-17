@@ -25,6 +25,7 @@ serde_derive = "1"
 thiserror = "1"
 # Disable default features to deselect a backend, then select one below
 curve25519-dalek = { version = "2", default-features = false, features = ["serde", "std"] }
+log = "0.4.8"
 
 [dev-dependencies]
 bincode = "1"

@@ -41,7 +41,11 @@ pub mod prover;
 /// Implements proof verification of compact and batchable proofs.
 pub mod verifier;
 /// Implements shamir secret sharing as needed
-pub mod shamir_secrets;
+pub mod shamir;
+/// generic secret sharing trait
+pub mod secrets;
+pub mod util;
+
 
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::scalar::Scalar;
