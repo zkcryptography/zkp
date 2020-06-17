@@ -127,7 +127,6 @@ impl<'a> Prover<'a> {
             false => return Err(result.err().unwrap())
         };
 
-
         Ok(proof)
     }
 }
@@ -176,21 +175,18 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
                         prev_clause_nr = *clause_nr;
                     }
                     if prev_clause_nr != *clause_nr {
-                        return Err(ProofError::InputMismatch);
+                        return Err(ProofError::TooManyKeys);
                     }
                     shares.push(None);
-                    let c = RistrettoPoint::multiscalar_mul(
+                    RistrettoPoint::multiscalar_mul(
                         rhs_lin_combo.iter().map(|(sc_var, _pt_var)| {
                             fake_responses.push(None);
                             blindings[sc_var.0].unwrap()
                         }),
                         rhs_lin_combo.iter().map(|(_sc_var, pt_var)| {
-                            // println!("G: {:?}", self.points[pt_var.0].compress());
                             self.points[pt_var.0]
                         }),
-                    );
-                    // println!("c = {:?}", c.compress());
-                    c
+                    )
                 }
                 false => {              // if we don't have a blinding, we don't have a secret value and will be faking one
                     let challenge = Scalar::random(&mut transcript_rng);
@@ -224,7 +220,7 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
     }
 
     fn challenge(&mut self) {
-        self.challenge = self.transcript.get_challenge(b"chal")
+        self.challenge = self.transcript.get_challenge(b"chal");
     }
 
     fn response(&mut self) {
@@ -237,9 +233,8 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         }
         let mut transcript_rng = rng_builder.finalize(&mut thread_rng());
 
-        // threshold shouldn't be fake_responses.len(); it should be the number of fake_responses which are Some()
-        // we also have to add one to account for having the secret itself
-        let threshold = 1 + self.fake_responses.iter().filter(|r| r.is_some()).collect::<Vec<&Option<Scalar>>>().len();
+        // threshold is the number of fake_responses which are Some(), plus one to account for the secret itself
+        let threshold = 1 + self.known_chal_shares.iter().filter(|r| r.is_some()).count();
         let challenges = SecretShare::complete(self.challenge, threshold, &mut self.known_chal_shares, &mut transcript_rng).unwrap();
         let blindings = &self.blindings;
         let fake_responses = &self.fake_responses;
@@ -253,6 +248,7 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
                 }
             })
             .collect::<Vec<Scalar>>();
+
         let out_shares = challenges.shares.iter().map(|s| s.unwrap()).collect();
         let commitments = self.commitments.clone();
         self.proof = BatchableProof{

@@ -1,22 +1,21 @@
-extern crate rand;
+#![allow(non_snake_case)]
 
+extern crate rand;
 use rand::{thread_rng, CryptoRng, RngCore};
 
 extern crate curve25519_dalek;
-
 use curve25519_dalek::constants as dalek_constants;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::scalar::Scalar;
 
 #[macro_use]
 extern crate zkp;
-
 pub use zkp::Transcript;
 use zkp::ProofError;
 
 
 define_proof! {basic_or_clause, "basic_or_clause", (x,y), (A, B, G), () : A = (G ^ x) || B = (G ^ y)}
-define_proof! {complex_or_clause, "complex_or_clause", (x, y), (A, B, C, D, G), (): A = (G^x) && B = (G^y) || C = (G^x) && D = (G^y)}
+define_proof! {complex_or_clause, "complex_or_clause", (x, y, z, a), (A, B, C, D, G), (): A = (G^x) && B = (G^y) || C = (G^z) && D = (G^a)}
 
 /// Defines how the construction interacts with the transcript.
 trait TranscriptProtocol {
@@ -89,7 +88,7 @@ impl KeyPair {
             },
         );
         if result.is_err() {
-            println!("{}", result.as_ref().err().unwrap());
+            assert!(false, format!("{}", result.as_ref().err().unwrap()));
         }
 
         let (proof, _points) = result.unwrap();
@@ -219,7 +218,6 @@ fn basic_or_test() {
 
     // Serialize and parse bincode representation
     let proof_bytes = bincode::serialize(&proof).unwrap();
-    // println!("{:?}", proof_bytes);
     let parsed_proof: basic_or_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
 
     // Verifier logic
@@ -253,6 +251,8 @@ fn complex_or_test() {
             complex_or_clause::ProveAssignments {
                 x: &Some(x),
                 y: &Some(y),
+                z: &None,
+                a: &None,
                 A: &A,
                 B: &B,
                 C: &C,
@@ -266,12 +266,11 @@ fn complex_or_test() {
         Ok((proof, points)) => {
             // Serialize and parse bincode representation
             let proof_bytes = bincode::serialize(&proof).unwrap();
-            // println!("{:?}", proof_bytes);
             let parsed_proof: complex_or_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
 
             // Verifier logic
             let mut transcript = Transcript::new(b"Or Clause Test");
-            assert!(complex_or_clause::verify_compact(
+            let ver = complex_or_clause::verify_compact(
                 &parsed_proof,
                 &mut transcript,
                 complex_or_clause::VerifyAssignments {
@@ -281,8 +280,11 @@ fn complex_or_test() {
                     D: &points.D,
                     G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
                 },
-            )
-            .is_ok());
+            );
+            match ver {
+                Err(e) => assert!(false, format!("Error verifying proof: {}", e)),
+                Ok(_) => assert!(true),
+            }
         },
     }
 }
