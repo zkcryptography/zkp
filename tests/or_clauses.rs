@@ -288,3 +288,59 @@ fn complex_or_test() {
         },
     }
 }
+
+
+#[test]
+fn or_test_insufficient_keys() {
+    // Prover's scope
+    let res = {
+        let x = Scalar::from(89327492234u64).invert();
+        let y = Scalar::from(8675309u32);
+        let A = &x * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let B = &y * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let C = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let D = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+
+        let mut transcript = Transcript::new(b"Or Clause Test");
+        complex_or_clause::prove_compact(
+            &mut transcript,
+            complex_or_clause::ProveAssignments {
+                x: &Some(x),
+                y: &None,
+                z: &None,
+                a: &None,
+                A: &A,
+                B: &B,
+                C: &C,
+                D: &D,
+                G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
+            },
+        )
+    };
+    match res {
+        Err(e) => assert!(false, format!("Error building proof: {}", e)),
+        Ok((proof, points)) => {
+            // Serialize and parse bincode representation
+            let proof_bytes = bincode::serialize(&proof).unwrap();
+            let parsed_proof: complex_or_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+
+            // Verifier logic
+            let mut transcript = Transcript::new(b"Or Clause Test");
+            let ver = complex_or_clause::verify_compact(
+                &parsed_proof,
+                &mut transcript,
+                complex_or_clause::VerifyAssignments {
+                    A: &points.A,
+                    B: &points.B,
+                    C: &points.C,
+                    D: &points.D,
+                    G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
+                },
+            );
+            match ver {
+                Err(e) => assert!(true, format!("This was intended to fail: {}", e)),
+                Ok(_) => assert!(false, "This was supposed to fail!"),
+            }
+        },
+    }
+}
