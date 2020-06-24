@@ -2,6 +2,7 @@ use curve25519_dalek::scalar::Scalar;
 use rand::{CryptoRng, RngCore};
 use std::cmp::Ordering;
 use std::cmp::max;
+use log::info;
 
 /// A struct holding useful information about a Shamir secret sharing execution.
 ///
@@ -185,6 +186,8 @@ impl SecretShare {
             }
         }
 
+        info!("Asked to complete w/ threshold {} and {} shares", threshold, points.len() - 1);
+
         // STEP ONE: if the total number of points we have (sparse_shares + secret) is < threshold, we need to generate
         // random points to fill in the gaps.
         let nr_of_shares = points.len() - 1;
@@ -247,6 +250,8 @@ impl SecretShare {
                 num_shares += 1;
             }
         }
+
+        info!("Reconstructing from {} shares w/ threshold {}", num_shares, threshold);
 
         if threshold > num_shares {
             return Err(String::from("Not enough shares to meet the threshold"));

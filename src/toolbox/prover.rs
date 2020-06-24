@@ -8,6 +8,8 @@ use crate::toolbox::{SchnorrCS, TranscriptProtocol, IsSigmaProtocol};
 use crate::{BatchableProof, CompactProof, Transcript, ProofError};
 use crate::toolbox::shamir_secrets::SecretShare;
 use std::iter;
+use std::str;
+use log::{trace, debug, info, warn};
 
 /// Used to create proofs.
 ///
@@ -41,11 +43,11 @@ pub struct Prover<'a> {
 }
 
 /// A secret variable used during proving.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct ScalarVar(usize);
 
 /// A public variable used during proving.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct PointVar(usize);
 
 impl<'a> Prover<'a> {
@@ -71,6 +73,7 @@ impl<'a> Prover<'a> {
 
     /// Allocate and assign a secret variable with the given `label`.  It returns the index of this new ScalarVar in the scalars Vector.
     pub fn allocate_scalar(&mut self, label: &'static [u8], assignment: Option<Scalar>) -> ScalarVar {
+        trace!("Allocating scalar {}", str::from_utf8(label).unwrap());
         self.transcript.append_scalar_var(label);
         self.scalars.push(assignment);
         ScalarVar(self.scalars.len() - 1)
@@ -86,6 +89,7 @@ impl<'a> Prover<'a> {
         label: &'static [u8],
         assignment: RistrettoPoint,
     ) -> (PointVar, CompressedRistretto) {
+        trace!("Allocating point {}", str::from_utf8(label).unwrap());
         let compressed = self.transcript.append_point_var(label, &assignment);
         self.points.push(assignment);
         self.point_labels.push(label);
