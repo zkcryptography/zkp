@@ -54,6 +54,46 @@ fn and_test_basic() {
 }
 
 #[test]
+fn and_test_adv_wrong() {
+    // Prover's scope
+    let (proof, points) = {
+        let x = Scalar::from(89327492234u64).invert();
+        let y = Scalar::from(8675309u64);
+        let A = &x * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let B = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+
+        let mut transcript = Transcript::new(b"And Clause Test");
+        basic_and_clause::prove_compact(
+            &mut transcript,
+            basic_and_clause::ProveAssignments {
+                x: &Some(x),
+                y: &Some(y),
+                A: &A,
+                B: &B,
+                G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
+            },
+        ).unwrap()
+    };
+
+    // Serialize and parse bincode representation
+    let proof_bytes = bincode::serialize(&proof).unwrap();
+    let parsed_proof: basic_and_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+
+    // Verifier logic
+    let mut transcript = Transcript::new(b"And Clause Test");
+    assert!(basic_and_clause::verify_compact(
+        &parsed_proof,
+        &mut transcript,
+        basic_and_clause::VerifyAssignments {
+            A: &points.A,
+            B: &points.B,
+            G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
+        },
+    )
+    .is_err());
+}
+
+#[test]
 fn and_test_complex() {
     // Prover's scope
     let res = {
@@ -132,27 +172,7 @@ fn and_test_insufficient_keys() {
         )
     };
     match res {
-        Err(e) => assert!(false, format!("Error building proof: {}", e)),
-        Ok((proof, points)) => {
-            // Serialize and parse bincode representation
-            let proof_bytes = bincode::serialize(&proof).unwrap();
-            let parsed_proof: basic_and_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
-
-            // Verifier logic
-            let mut transcript = Transcript::new(b"And Clause Test");
-            let ver = basic_and_clause::verify_compact(
-                &parsed_proof,
-                &mut transcript,
-                basic_and_clause::VerifyAssignments {
-                    A: &points.A,
-                    B: &points.B,
-                    G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
-                },
-            );
-            match ver {
-                Err(e) => assert!(true, format!("This was intended to fail: {}", e)),
-                Ok(_) => assert!(false, "This was supposed to fail!"),
-            }
-        },
-    }
+        Err(_) => assert!(true),
+        Ok(_) => assert!(false, "Shouldn't have been able to build a prover"),
+    };
 }

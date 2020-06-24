@@ -10,9 +10,9 @@ pub enum ProofError {
     #[error("Mismatched parameter sizes for batch verification.")]
     BatchSizeMismatch,
 
-    /// Occurs during creation of proof when we find private keys in more than one OR clause
-    #[error("You provided private keys for terms in more than one OR clause - this is not allowed.")]
-    TooManyKeys,
+    /// Occurs during creation of proof when we find a mix of known/unknown keys in a given clause
+    #[error("You provided a private key for a clause that you can't complete - this is an invalid configuration")]
+    KeysMismatch,
 
     /// Occurs during verification if the input parameters do not have the expected form
     #[error("The number of provided responses does not match the expected number")]

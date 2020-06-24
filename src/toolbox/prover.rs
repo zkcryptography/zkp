@@ -39,6 +39,7 @@ pub struct Prover<'a> {
     blindings: Vec<Option<Scalar>>,
     fake_responses: Vec<Option<Scalar>>,
     known_chal_shares: Vec<Option<Scalar>>,
+    nr_clauses: usize,
     challenge: Scalar,
 }
 
@@ -67,6 +68,7 @@ impl<'a> Prover<'a> {
             blindings: Vec::default(),
             fake_responses: Vec::default(),
             known_chal_shares: Vec::default(),
+            nr_clauses: 0,
             challenge: Default::default()
         }
     }
@@ -98,6 +100,10 @@ impl<'a> Prover<'a> {
 
     /// The compact and batchable proofs differ only by which data they store.
     fn prove_impl(mut self) -> Result<BatchableProof, ProofError> {
+        self.nr_clauses = match self.constraints.last() {
+            None => 0,
+            Some(x) => x.0,
+        };
         let result = self.commit();
         if result.is_err() {
             return Err(result.err().unwrap());
@@ -164,8 +170,14 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         let mut commitments = Vec::with_capacity(self.constraints.len());
         let mut fake_responses = Vec::with_capacity(self.constraints.iter().map(|cs| &cs.1).count());
         let mut shares = Vec::with_capacity(self.constraints.len());
-        let mut prev_clause_nr = 0;
+        let mut clause_tracker = vec![None; self.nr_clauses+1];
+        // let mut prev_clause_nr = 0;
         for (clause_nr, lhs_var, rhs_lin_combo) in &self.constraints {
+            let lc = rhs_lin_combo.iter().map(|(scal, pt)| format!("{} ^ {:?}", str::from_utf8(self.point_labels[pt.0]).unwrap(), scal.0) ).collect::<Vec<String>>().join(" * ");
+            debug!("Constraint clause {}: {} = {}",
+                clause_nr,
+                str::from_utf8(self.point_labels[lhs_var.0]).unwrap(),
+                lc);
 
             // The first [0] picks the first entry in the linear combination.  We can test against only this one because we
             // know that all entries in a compound && clause (represented by a single constraint) MUST either be all known, or
@@ -175,12 +187,18 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
             let sv_index = (rhs_lin_combo[0].0).0;
             let commitment = match blindings[sv_index].is_some() {
                 true => {               // if we have a blinding, that means we have a secret value for this variable
-                    if prev_clause_nr == 0 {
-                        prev_clause_nr = *clause_nr;
+                    match clause_tracker[*clause_nr] {
+                        // this is the first time we've worked with this clause, initialize the tracker
+                        None => clause_tracker[*clause_nr] = Some(true),
+
+                        // Check to make sure the fact we have a blinding is consistent with other parts of this clause
+                        Some(isProving) => {
+                            if !isProving {
+                                return Err(ProofError::KeysMismatch)
+                            }
+                        }
                     }
-                    if prev_clause_nr != *clause_nr {
-                        return Err(ProofError::TooManyKeys);
-                    }
+
                     shares.push(None);
                     RistrettoPoint::multiscalar_mul(
                         rhs_lin_combo.iter().map(|(sc_var, _pt_var)| {
@@ -193,6 +211,18 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
                     )
                 }
                 false => {              // if we don't have a blinding, we don't have a secret value and will be faking one
+                    match clause_tracker[*clause_nr] {
+                        // this is the first time we've worked with this clause, initialize the tracker
+                        None => clause_tracker[*clause_nr] = Some(false),
+
+                        // Check to make sure the fact we're faking it is consistent with other parts of this clause
+                        Some(isProving) => {
+                            if isProving {
+                                return Err(ProofError::KeysMismatch)
+                            }
+                        },
+                    }
+
                     let challenge = Scalar::random(&mut transcript_rng);
                     shares.push(Some(challenge));
                     RistrettoPoint::multiscalar_mul(

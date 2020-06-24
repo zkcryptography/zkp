@@ -195,7 +195,7 @@ fn create_and_verify_or_sig() {
 }
 
 #[test]
-fn basic_or_test() {
+fn or_test_basic() {
     // Prover's scope
     let (proof, points) = {
         let x = Scalar::from(89327492234u64).invert();
@@ -235,7 +235,7 @@ fn basic_or_test() {
 }
 
 #[test]
-fn complex_or_test() {
+fn or_test_complex() {
     // Prover's scope
     let res = {
         let x = Scalar::from(89327492234u64).invert();
@@ -318,7 +318,41 @@ fn or_test_insufficient_keys() {
         )
     };
     match res {
-        Err(e) => assert!(false, format!("Error building proof: {}", e)),
+        Err(_) => assert!(true),
+        Ok(_) => assert!(false, "Shouldn't have been able to build this prover!"),
+    }
+}
+
+#[test]
+fn or_test_wrong_keys() {
+    // Prover's scope
+    let res = {
+        let x = Scalar::from(89327492234u64).invert();
+        let y = Scalar::from(8675309u32);
+        let z = Scalar::from(654u32);
+        let A = &x * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let B = &y * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let C = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let D = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+
+        let mut transcript = Transcript::new(b"Or Clause Test");
+        complex_or_clause::prove_compact(
+            &mut transcript,
+            complex_or_clause::ProveAssignments {
+                x: &Some(x),
+                y: &Some(z),
+                z: &None,
+                a: &None,
+                A: &A,
+                B: &B,
+                C: &C,
+                D: &D,
+                G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
+            },
+        )
+    };
+    match res {
+        Err(e) => assert!(false, "Error building proof: {}", e),
         Ok((proof, points)) => {
             // Serialize and parse bincode representation
             let proof_bytes = bincode::serialize(&proof).unwrap();
@@ -338,8 +372,8 @@ fn or_test_insufficient_keys() {
                 },
             );
             match ver {
-                Err(e) => assert!(true, format!("This was intended to fail: {}", e)),
-                Ok(_) => assert!(false, "This was supposed to fail!"),
+                Err(_) => assert!(true),
+                Ok(_) => assert!(false, "This proof should not have validated!"),
             }
         },
     }
