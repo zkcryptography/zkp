@@ -15,10 +15,6 @@ use crate::toolbox::secrets;
 /// in SSS, the point at x = 0 is the secret value, and we want to avoid any chance that someone will leave the secret
 /// sitting in the shares object and then pass it somewhere it shouldn't go.
 pub struct Shamir<R: CryptoRng + RngCore> {
-    // secret: Scalar,
-
-    /// A Vector of y-values for share points.  The corresponding x values are 1 + the vector index.
-    // pub shares: Vec<Option<Scalar>>,
     threshold: usize,
     rng: R,
 }
@@ -143,11 +139,8 @@ impl<R> secrets::SecretSharing for Shamir<R> where R: RngCore + CryptoRng {
     /// NO GUARANTEE of being derived from the same polynomial as the provided ones.  We pick an all-new polynomial
     /// which fits the provided points.  Camenish refers to this function as cmpl_Gamma in his thesis.
     ///
-    /// The sparse_shares vector should follow the "index + 1 = x" convention, but is allowed to contain Option values
+    /// The sparse_shares vector should follow the "index + 1 = x" convention, but is allowed to contain None values
     /// to represent missing shares.  DO NOT include the secret in sparse_shares, as it is passed in separately.
-    /// 
-    /// Corner cases:  need sanity checks on threshold and size of sparse_shares
-    /// The size of the vector we return is going to need to match the size of sparse_shares.  Do our shares match the is_some indices, or the is_none indices?
     fn complete(&mut self, secret: &Scalar, sparse_shares: &Vec<Option<Scalar>>) -> Result<Vec<Option<Scalar>>, String> {
         if self.threshold == 0 {
             // Threshold of 0 should be impossible, since it's going to at least have a single point (the secret)
