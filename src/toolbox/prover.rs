@@ -190,14 +190,10 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
                 true => {               // if we have a blinding, that means we have a secret value for this variable
                     match clause_tracker[*clause_nr] {
                         // this is the first time we've worked with this clause, initialize the tracker
-                        None => clause_tracker[*clause_nr] = Some(true),
+                        None => clause_tracker[*clause_nr] = Some((1, 1)),
 
-                        // Check to make sure the fact we have a blinding is consistent with other parts of this clause
-                        Some(isProving) => {
-                            if !isProving {
-                                return Err(ProofError::KeysMismatch)
-                            }
-                        }
+                        // We're adding a new known value, so increment the tracker
+                        Some((terms, filled_in)) => clause_tracker[*clause_nr] = Some((terms+1, filled_in+1)),
                     }
 
                     shares.push(None);
@@ -214,14 +210,10 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
                 false => {              // if we don't have a blinding, we don't have a secret value and will be faking one
                     match clause_tracker[*clause_nr] {
                         // this is the first time we've worked with this clause, initialize the tracker
-                        None => clause_tracker[*clause_nr] = Some(false),
+                        None => clause_tracker[*clause_nr] = Some((1, 0)),
 
-                        // Check to make sure the fact we're faking it is consistent with other parts of this clause
-                        Some(isProving) => {
-                            if isProving {
-                                return Err(ProofError::KeysMismatch)
-                            }
-                        },
+                        // we've added no new information here, so just count a new clause
+                        Some((terms, filled_in)) => clause_tracker[*clause_nr] = Some((terms+1, filled_in)),
                     }
 
                     let challenge = Scalar::random(&mut transcript_rng);
@@ -247,6 +239,22 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
 
             commitments.push(encoding);
         }
+
+        // Now that we know all the clauses, make sure at least one is full
+        let mut have_one = false;
+        for (i, clause) in clause_tracker.iter().enumerate() {
+            match clause {
+                Some((terms, filled_in)) => {
+                    debug!("Clause {} has {} terms and we know {} keys", i, terms, filled_in);
+                    if terms == filled_in { have_one = true; break; }
+                },
+                None => (),
+            }
+        }
+        if !have_one {
+            return Err(ProofError::InsufficientKeys)
+        }
+        
         self.blindings = blindings;
         self.commitments = commitments;
         self.fake_responses = fake_responses;

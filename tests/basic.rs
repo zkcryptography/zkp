@@ -85,15 +85,14 @@ fn super_basic_failing_test() {
 
     // Verifier logic
     let mut transcript = Transcript::new(b"Discrete Log Test");
-    if let Err(e) = dlp::verify_compact(&parsed_proof,
+    match dlp::verify_compact(&parsed_proof,
         &mut transcript,
         dlp::VerifyAssignments {
             A: &points.A,
             G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
         }
     ) {
-        println!("Proof Error: {}", e);
-    } else {
-        assert!(false);
+        Err(_) => assert!(true),
+        Ok(_) => assert!(false, "Shouldn't have been able to verify this!"),
     };
 }

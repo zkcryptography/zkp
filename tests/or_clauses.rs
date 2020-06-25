@@ -118,8 +118,13 @@ impl Signature {
     }
 }
 
+fn init() {
+    let _ = env_logger::builder().is_test(true).try_init();
+}
+
 #[test]
 fn create_and_verify_or_sig() {
+    init();
     let domain_sep = b"My Sig Application";
     let msg1 = b"Test Message 1";
     let msg2 = b"Test Message 2";
@@ -196,6 +201,7 @@ fn create_and_verify_or_sig() {
 
 #[test]
 fn or_test_basic() {
+    init();
     // Prover's scope
     let (proof, points) = {
         let x = Scalar::from(89327492234u64).invert();
@@ -236,6 +242,7 @@ fn or_test_basic() {
 
 #[test]
 fn or_test_complex() {
+    init();
     // Prover's scope
     let res = {
         let x = Scalar::from(89327492234u64).invert();
@@ -292,6 +299,7 @@ fn or_test_complex() {
 
 #[test]
 fn or_test_insufficient_keys() {
+    init();
     // Prover's scope
     let res = {
         let x = Scalar::from(89327492234u64).invert();
@@ -325,6 +333,7 @@ fn or_test_insufficient_keys() {
 
 #[test]
 fn or_test_wrong_keys() {
+    init();
     // Prover's scope
     let res = {
         let x = Scalar::from(89327492234u64).invert();
