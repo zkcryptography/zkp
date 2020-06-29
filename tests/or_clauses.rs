@@ -87,9 +87,7 @@ impl KeyPair {
                 G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
             },
         );
-        if result.is_err() {
-            assert!(false, format!("{}", result.as_ref().err().unwrap()));
-        }
+        assert!(result.is_ok(), format!("{}", result.as_ref().err().unwrap()));
 
         let (proof, _points) = result.unwrap();
         return Signature(proof);
@@ -288,10 +286,7 @@ fn or_test_complex() {
                     G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
                 },
             );
-            match ver {
-                Err(e) => assert!(false, format!("Error verifying proof: {}", e)),
-                Ok(_) => assert!(true),
-            }
+            assert!(ver.is_ok(), format!("Error verifying proof: {}", ver.unwrap_err()));
         },
     }
 }
@@ -325,10 +320,7 @@ fn or_test_insufficient_keys() {
             },
         )
     };
-    match res {
-        Err(_) => assert!(true),
-        Ok(_) => assert!(false, "Shouldn't have been able to build this prover!"),
-    }
+    assert!(res.is_err(), "Shouldn't have been able to build this prover!");
 }
 
 #[test]
@@ -380,10 +372,7 @@ fn or_test_wrong_keys() {
                     G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
                 },
             );
-            match ver {
-                Err(_) => assert!(true),
-                Ok(_) => assert!(false, "This proof should not have validated!"),
-            }
+            assert!(ver.is_err(), "This proof should not have validated!");
         },
     }
 }

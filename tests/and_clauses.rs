@@ -171,8 +171,5 @@ fn and_test_insufficient_keys() {
             },
         )
     };
-    match res {
-        Err(_) => assert!(true),
-        Ok(_) => assert!(false, "Shouldn't have been able to build a prover"),
-    };
+    assert!(res.is_err(), "Shouldn't have been able to build a prover");
 }

@@ -174,11 +174,13 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         let mut clause_tracker = vec![None; self.nr_clauses+1];
         // let mut prev_clause_nr = 0;
         for (clause_nr, lhs_var, rhs_lin_combo) in &self.constraints {
-            let lc = rhs_lin_combo.iter().map(|(scal, pt)| format!("{} ^ {:?}", str::from_utf8(self.point_labels[pt.0]).unwrap(), scal.0) ).collect::<Vec<String>>().join(" * ");
             debug!("Constraint clause {}: {} = {}",
                 clause_nr,
                 str::from_utf8(self.point_labels[lhs_var.0]).unwrap(),
-                lc);
+                rhs_lin_combo.iter().map(
+                    |(scal, pt)| format!("{} ^ {:?}", str::from_utf8(self.point_labels[pt.0]).unwrap(), scal.0)
+                ).collect::<Vec<String>>().join(" * ")
+            );
 
             // The first [0] picks the first entry in the linear combination.  We can test against only this one because we
             // know that all entries in a compound && clause (represented by a single constraint) MUST either be all known, or
@@ -188,13 +190,13 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
             let sv_index = (rhs_lin_combo[0].0).0;
             let commitment = match blindings[sv_index].is_some() {
                 true => {               // if we have a blinding, that means we have a secret value for this variable
-                    match clause_tracker[*clause_nr] {
+                    clause_tracker[*clause_nr] = match clause_tracker[*clause_nr] {
                         // this is the first time we've worked with this clause, initialize the tracker
-                        None => clause_tracker[*clause_nr] = Some((1, 1)),
+                        None => Some((1, 1)),
 
                         // We're adding a new known value, so increment the tracker
-                        Some((terms, filled_in)) => clause_tracker[*clause_nr] = Some((terms+1, filled_in+1)),
-                    }
+                        Some((terms, filled_in)) => Some((terms+1, filled_in+1)),
+                    };
 
                     shares.push(None);
                     RistrettoPoint::multiscalar_mul(
@@ -208,13 +210,13 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
                     )
                 }
                 false => {              // if we don't have a blinding, we don't have a secret value and will be faking one
-                    match clause_tracker[*clause_nr] {
+                    clause_tracker[*clause_nr] = match clause_tracker[*clause_nr] {
                         // this is the first time we've worked with this clause, initialize the tracker
-                        None => clause_tracker[*clause_nr] = Some((1, 0)),
+                        None => Some((1, 0)),
 
                         // we've added no new information here, so just count a new clause
-                        Some((terms, filled_in)) => clause_tracker[*clause_nr] = Some((terms+1, filled_in)),
-                    }
+                        Some((terms, filled_in)) => Some((terms+1, filled_in)),
+                    };
 
                     let challenge = Scalar::random(&mut transcript_rng);
                     shares.push(Some(challenge));
@@ -268,17 +270,18 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
 
     fn response(&mut self) {
         // Construct a TranscriptRng
-        let mut rng_builder = self.transcript.build_rng();
-        for scalar in &self.scalars {
-            if scalar.is_some() {
-                rng_builder = rng_builder.rekey_with_witness_bytes(b"", scalar.unwrap().as_bytes());
-            }
-        }
-        let mut transcript_rng = rng_builder.finalize(&mut thread_rng());
+        // let mut rng_builder = self.transcript.build_rng();
+        // for scalar in &self.scalars {
+        //     if scalar.is_some() {
+        //         rng_builder = rng_builder.rekey_with_witness_bytes(b"", scalar.unwrap().as_bytes());
+        //     }
+        // }
+        // let mut transcript_rng = rng_builder.finalize(&mut thread_rng());
+        let mut rng = rand::thread_rng();
 
         // threshold is the number of fake_responses which are Some(), plus one to account for the secret itself
         let threshold = 1 + self.known_chal_shares.iter().filter(|r| r.is_some()).count();
-        let mut sham = Shamir::new(threshold, &mut transcript_rng);
+        let mut sham = Shamir::new(threshold, &mut rng);
         let challenges = sham.complete(&self.challenge, &self.known_chal_shares).unwrap();
         let blindings = &self.blindings;
         let fake_responses = &self.fake_responses;

@@ -145,10 +145,11 @@ impl<R> secrets::SecretSharing for Shamir<R> where R: RngCore + CryptoRng {
         if self.threshold == 0 {
             // Threshold of 0 should be impossible, since it's going to at least have a single point (the secret)
             return Err(String::from("Threshold of zero is invalid for Shamir's Secret Sharing"));
-        } else if self.threshold == 1 {
-            // If threshold is 1, we're reconstructing a single point.  The polynomial is y = secret.
-            return Ok(sparse_shares.iter().map(|s| match s { Some(x) => Some(*x), None => Some(*secret)}).collect())
         }
+        // } else if self.threshold == 1 {
+        //     // If threshold is 1, we're reconstructing a single point.  The polynomial is y = secret.
+        //     return Ok(sparse_shares.iter().map(|s| match s { Some(x) => Some(*x), None => Some(*secret)}).collect())
+        // }
 
         // Set up our data structures for later reference.  Initially, `empties` will contain all of the shares with
         // y = None, and `points` has all the points with Some.  As we go, we'll build up `points` even more by taking
@@ -254,37 +255,6 @@ impl<R> secrets::SecretSharing for Shamir<R> where R: RngCore + CryptoRng {
 mod tests {
     use super::*;
     use crate::toolbox::secrets::SecretSharing;
-
-    #[test]
-    fn shamir_pow_easy() {
-        for p in vec![0, 1, 2, 4] {
-            let val = util::pow(&Scalar::one(), p);
-            assert_eq!(Scalar::one(), val);
-        };
-    }
-
-    #[test]
-    fn shamir_pow_medium() {
-        let val = util::pow(&Scalar::from(2u32), 2);
-        assert_eq!(Scalar::from(4u32), val);
-
-        let val = util::pow(&Scalar::from(8u32), 2);
-        assert_eq!(Scalar::from(64u32), val);
-
-        let val = util::pow(&Scalar::from(9u32), 3);
-        assert_eq!(Scalar::from(729u32), val);
-    }
-
-    #[test]
-    fn shamir_pow_overflow() {
-        // in decimal, 5383850369160867882082008644310060803097890751578601301633528521931415479118
-        let the_scalar = Scalar::from_canonical_bytes([78, 227, 105, 171, 173, 162, 96, 141, 241, 244, 32, 246, 255, 9, 210, 32, 110, 245, 179, 133, 8, 34, 83, 32, 220, 162, 102, 9, 189, 38, 231, 11]).unwrap();
-
-        // in decimal, 905024118957487278709981156877405425812244224552873609041215153919592868854
-        let the_answer = Scalar::from_canonical_bytes([246, 171, 1, 72, 68, 73, 121, 162, 178, 134, 163, 34, 136, 171, 117, 234, 5, 196, 64, 75, 61, 139, 40, 49, 68, 126, 27, 73, 186, 57, 0, 2]).unwrap();
-        let val = util::pow(&the_scalar, 32);
-        assert_eq!(the_answer, val);
-    }
 
     #[test]
     fn shamir_polynomial_easy() {
@@ -424,6 +394,33 @@ mod tests {
                 }
             },
             Err(e) => assert!(false, "Couldn't complete shares: {}", e),
+        }
+    }
+
+    #[test]
+    fn shamir_complete_one() {
+        let secret = Scalar::one();
+        let yis = vec![Some(Scalar::one()); 4];
+        let mut sham = Shamir::new_without_rng(1);
+        match sham.complete(&secret, &yis) {
+            Ok(shares) => {
+                for x in shares.iter() {
+                    assert_eq!(secret, x.unwrap());
+                }
+            },
+            Err(e) => assert!(false, "Couldn't complete shares: {}", e),
+        }
+    }
+
+    #[test]
+    fn shamir_complete_one_bad() {
+        let secret = Scalar::one();
+        let mut yis = vec![Some(Scalar::one()); 4];
+        yis[3] = Some(Scalar::from(2u32));
+        let mut sham = Shamir::new_without_rng(1);
+        match sham.complete(&secret, &yis) {
+            Ok(_) => assert!(false, "Should not have been able to complete"),
+            Err(e) => assert!(e.contains("is not on the line")),
         }
     }
 }
