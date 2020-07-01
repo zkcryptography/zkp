@@ -44,6 +44,9 @@ pub mod verifier;
 pub mod shamir;
 /// generic secret sharing trait
 pub mod secrets;
+/// Implements secret sharing via XOR
+pub mod xor;
+
 pub mod util;
 
 

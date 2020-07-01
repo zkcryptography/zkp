@@ -111,9 +111,7 @@ impl Shamir<ThreadRng> {
 
 impl<R> secrets::SecretSharing for Shamir<R> where R: RngCore + CryptoRng {
 
-    /// Given a secret and some other information, calculate a set of shares using Shamir's Secret Sharing.  We don't
-    /// expect this code to ever be called by our application, but it's useful for testing.
-    fn share(&mut self, secret: &Scalar, nr_of_shares: usize) -> Vec<Option<Scalar>> {
+    fn share(&mut self, secret: &Scalar, nr_of_shares: usize) -> Result<Vec<Option<Scalar>>, String> {
 
         // first, select random coefficients for each term (less the first) in the polynomial
         let mut coefficients: Vec<Scalar> = Vec::new();
@@ -132,12 +130,11 @@ impl<R> secrets::SecretSharing for Shamir<R> where R: RngCore + CryptoRng {
             shares.push(Some(y));
         }
 
-        shares
+        return Ok(shares);
     }
 
-    /// Given some shares and the secret, compute a valid set of additional shares.  Note that the new shares have
-    /// NO GUARANTEE of being derived from the same polynomial as the provided ones.  We pick an all-new polynomial
-    /// which fits the provided points.  Camenish refers to this function as cmpl_Gamma in his thesis.
+    /// GNote that the new shares have NO GUARANTEE of being derived from the same polynomial as the provided ones.  
+    /// We pick an all-new polynomial which fits the provided points.
     ///
     /// The sparse_shares vector should follow the "index + 1 = x" convention, but is allowed to contain None values
     /// to represent missing shares.  DO NOT include the secret in sparse_shares, as it is passed in separately.
@@ -320,7 +317,8 @@ mod tests {
         let secret = Scalar::random(&mut rng);
         let mut sham = Shamir::new_without_rng(10);
         let shares = sham.share(&secret, 20);
-        match sham.reconstruct(&shares[0..10].to_vec()) {
+        assert!(shares.is_ok());
+        match sham.reconstruct(&shares.unwrap()[0..10].to_vec()) {
             Err(e) => assert!(false, "Error reconstructing: {}", e),
             Ok(val) => assert_eq!(secret, val),
         }
@@ -332,6 +330,8 @@ mod tests {
         let secret = Scalar::random(&mut rng);
         let mut sham = Shamir::new_without_rng(10);
         let shares = sham.share(&secret, 20);
+        assert!(shares.is_ok());
+        let shares = shares.unwrap();
         assert_eq!(20, shares.len());
         match sham.reconstruct(&shares) {
             Err(e) => assert!(false, "Error reconstructing: {}", e),
@@ -355,7 +355,9 @@ mod tests {
         let mut rng = rand::thread_rng();
         let secret = Scalar::random(&mut rng);
         let mut sham = Shamir::new_without_rng(10);
-        let mut shares = sham.share(&secret, 20);
+        let shares = sham.share(&secret, 20);
+        assert!(shares.is_ok());
+        let mut shares = shares.unwrap();
         shares[5] = if shares[5].unwrap() == Scalar::one() { Some(Scalar::zero()) } else { Some(Scalar::one()) };
         match sham.reconstruct(&shares) {
             Err(e) => assert!(e.contains("Not all values fit into reconstruction")),
