@@ -13,8 +13,13 @@ pub use zkp::Transcript;
 define_proof! {basic_and_clause, "basic_and_clause", (x,y), (A, B, G), () : A = (G ^ x) && B = (G ^ y)}
 define_proof! {complex_and_clause, "complex_and_clause", (x, y, z, a), (A, B, C, D, G), (): A = (G^x) && B = (G^y) && C = (G^z) && D = (G^a)}
 
+fn init() {
+    let _ = env_logger::builder().is_test(true).try_init();
+}
+
 #[test]
 fn and_test_basic() {
+    init();
     // Prover's scope
     let (proof, points) = {
         let x = Scalar::from(89327492234u64).invert();
@@ -55,6 +60,7 @@ fn and_test_basic() {
 
 #[test]
 fn and_test_adv_wrong() {
+    init();
     // Prover's scope
     let (proof, points) = {
         let x = Scalar::from(89327492234u64).invert();
@@ -95,6 +101,7 @@ fn and_test_adv_wrong() {
 
 #[test]
 fn and_test_complex() {
+    init();
     // Prover's scope
     let res = {
         let x = Scalar::from(89327492234u64).invert();
@@ -153,6 +160,7 @@ fn and_test_complex() {
 
 #[test]
 fn and_test_insufficient_keys() {
+    init();
     // Prover's scope
     let res = {
         let x = Scalar::from(89327492234u64).invert();

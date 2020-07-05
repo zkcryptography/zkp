@@ -6,7 +6,7 @@ use std::cmp::max;
 use std::clone::Clone;
 use log::info;
 use crate::toolbox::util;
-use crate::toolbox::secrets;
+use crate::toolbox::secrets::{SecretSharing, Share};
 
 /// A struct holding useful information about a Shamir secret sharing execution.
 ///
@@ -20,41 +20,47 @@ pub struct Shamir<R: CryptoRng + RngCore> {
 }
 
 #[derive(Debug, Clone, Copy)]
-struct Share {
-    x: Scalar,
-    y: Option<Scalar>,
+pub struct ShamirShare {
+    x: Scalar,              // the x value of the share
+    y: Option<Scalar>,      // the f(x) value of the share.
 }
 
-impl Ord for Share {
-    fn cmp(&self, other: &Self) -> Ordering {
-        return self.partial_cmp(other).unwrap();
+impl Share for ShamirShare {
+    fn get_value(&self) -> Scalar {
+        return self.y.unwrap();
     }
 }
 
-impl PartialOrd for Share {
-    // order by x values, then by y values
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        let xorder = util::compare_scalars(&self.x, &other.x);
-        if xorder == Ordering::Equal {
-            return match (self.y, other.y) {
-                (None,    None)    => Some(Ordering::Equal),
-                (None,    Some(_)) => Some(Ordering::Less),
-                (Some(_), None)    => Some(Ordering::Greater),
-                (Some(a), Some(b)) => Some(util::compare_scalars(&a, &b)),
-            };
-        } else {
-            return Some(xorder);
-        }
-    }
-}
+// impl Ord for ShamirShare {
+//     fn cmp(&self, other: &Self) -> Ordering {
+//         return self.partial_cmp(other).unwrap();
+//     }
+// }
 
-impl PartialEq for Share {
-    fn eq(&self, other: &Self) -> bool {
-        return self.x == other.x && self.y == other.y;
-    }
-}
+// impl PartialOrd for ShamirShare {
+//     // order by x values, then by y values
+//     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+//         let xorder = util::compare_scalars(&self.x, &other.x);
+//         if xorder == Ordering::Equal {
+//             return match (self.y, other.y) {
+//                 (None,    None)    => Some(Ordering::Equal),
+//                 (None,    Some(_)) => Some(Ordering::Less),
+//                 (Some(_), None)    => Some(Ordering::Greater),
+//                 (Some(a), Some(b)) => Some(util::compare_scalars(&a, &b)),
+//             };
+//         } else {
+//             return Some(xorder);
+//         }
+//     }
+// }
 
-impl Eq for Share {}
+// impl PartialEq for ShamirShare {
+//     fn eq(&self, other: &Self) -> bool {
+//         return self.x == other.x && self.y == other.y;
+//     }
+// }
+
+// impl Eq for ShamirShare {}
 
 /// Given a set of polynomial coefficients, calculate the value of the polynomial at x.
 fn calc_polynomial(coefficients: &Vec<Scalar>, x: &Scalar) -> Scalar {
@@ -109,9 +115,9 @@ impl Shamir<ThreadRng> {
     }
 }
 
-impl<R> secrets::SecretSharing for Shamir<R> where R: RngCore + CryptoRng {
+impl<R> SecretSharing for Shamir<R> where R: RngCore + CryptoRng {
 
-    fn share(&mut self, secret: &Scalar, nr_of_shares: usize) -> Result<Vec<Option<Scalar>>, String> {
+    fn share(&mut self, secret: &Scalar, nr_of_shares: usize) -> Result<Vec<Box<dyn Share>>, String> {
 
         // first, select random coefficients for each term (less the first) in the polynomial
         let mut coefficients: Vec<Scalar> = Vec::new();
@@ -123,14 +129,14 @@ impl<R> secrets::SecretSharing for Shamir<R> where R: RngCore + CryptoRng {
 
         // now, calculate points on the line as our shares.
         // we encode the x value as the index of the vec
-        let mut shares: Vec<Option<Scalar>> = Vec::new();
+        let mut shares = Vec::new();
         for i in 0..nr_of_shares {
             let x = Scalar::from((i+1) as u64);
             let y = calc_polynomial(&coefficients, &x);
-            shares.push(Some(y));
+            shares.push(ShamirShare { x, y: Some(y) });
         }
 
-        return Ok(shares);
+        return Ok(shares.iter().map(|s| Box::from(*s) as Box<dyn Share>).collect());
     }
 
     /// GNote that the new shares have NO GUARANTEE of being derived from the same polynomial as the provided ones.  
@@ -138,7 +144,7 @@ impl<R> secrets::SecretSharing for Shamir<R> where R: RngCore + CryptoRng {
     ///
     /// The sparse_shares vector should follow the "index + 1 = x" convention, but is allowed to contain None values
     /// to represent missing shares.  DO NOT include the secret in sparse_shares, as it is passed in separately.
-    fn complete(&mut self, secret: &Scalar, sparse_shares: &Vec<Option<Scalar>>) -> Result<Vec<Option<Scalar>>, String> {
+    fn complete(&mut self, secret: &Scalar, sparse_shares: &Vec<Option<Box<dyn Share>>>) -> Result<Vec<Box<dyn Share>>, String> {
         if self.threshold == 0 {
             // Threshold of 0 should be impossible, since it's going to at least have a single point (the secret)
             return Err(String::from("Threshold of zero is invalid for Shamir's Secret Sharing"));
@@ -151,18 +157,15 @@ impl<R> secrets::SecretSharing for Shamir<R> where R: RngCore + CryptoRng {
         // Set up our data structures for later reference.  Initially, `empties` will contain all of the shares with
         // y = None, and `points` has all the points with Some.  As we go, we'll build up `points` even more by taking
         // from `empties`.
-        let mut empties: Vec<Share> = Vec::new();
-        let mut points: Vec<Share> = Vec::new();
-        points.push(Share { x: Scalar::zero(), y: Some(*secret) } );
+        let mut empties: Vec<ShamirShare> = Vec::new();
+        let mut points: Vec<ShamirShare> = Vec::new();
+        points.push(ShamirShare { x: Scalar::zero(), y: Some(*secret) } );
 
         for (xi, share) in sparse_shares.iter().enumerate() {
-            let x = Scalar::from((xi + 1) as u64);
-            let mut s = Share {x, y: None};
             if share.is_some() {
-                s.y = share.clone();
-                points.push(s);
+                points.push(share.unwrap() as ShamirShare);
             } else {
-                empties.push(s);
+                empties.push(ShamirShare { x: Scalar::from((xi + 1) as u64), y: None });
             }
         }
 
@@ -208,27 +211,21 @@ impl<R> secrets::SecretSharing for Shamir<R> where R: RngCore + CryptoRng {
             }
         }
 
-        let mut new_shares = points[1..].to_vec();
-        new_shares.sort();
-        Ok(new_shares.iter().map(|n| n.y).collect())
+        return Ok(points[1..].to_vec());
     }
 
     /// Given enough shares, output the secret.
-    fn reconstruct(&mut self, sparse_shares: &Vec<Option<Scalar>>) -> Result<Scalar, String> {
+    fn reconstruct(&mut self, shares: &Vec<ShamirShare>) -> Result<Scalar, String> {
         let mut xis: Vec<Scalar> = Vec::new();
         let mut yis: Vec<Scalar> = Vec::new();
-        let mut num_shares = 0;
-        for (i, s) in sparse_shares.iter().enumerate() {
-            if s.is_some() {
-                xis.push(Scalar::from((i as u32) + 1));
-                yis.push(s.unwrap());
-                num_shares += 1;
-            }
+        for s in shares.iter() {
+            xis.push(s.x);
+            yis.push(s.y.unwrap());
         }
 
-        info!("Reconstructing from {} shares w/ threshold {}", num_shares, self.threshold);
+        info!("Reconstructing from {} shares w/ threshold {}", shares.len(), self.threshold);
 
-        if self.threshold > num_shares {
+        if self.threshold > shares.len() {
             return Err(String::from("Not enough shares to meet the threshold"));
         }
 
@@ -253,17 +250,25 @@ mod tests {
     use super::*;
     use crate::toolbox::secrets::SecretSharing;
 
+    const one: Scalar = Scalar::one();
+
+    // The tests in this module are generally written around the polynomial y = 
+    const first:  ShamirShare = ShamirShare { x: Scalar::from(1u32), y: Some(Scalar::from(272u32))};
+    const second: ShamirShare = ShamirShare { x: Scalar::from(2u32), y: Some(Scalar::from(935u32))};
+    const third:  ShamirShare = ShamirShare { x: Scalar::from(3u32), y: Some(Scalar::from(1990u32))};
+    const fourth: ShamirShare = ShamirShare { x: Scalar::from(4u32), y: Some(Scalar::from(3437u32))};
+
     #[test]
     fn shamir_polynomial_easy() {
-        let coefficients = vec![Scalar::one(), Scalar::one(), Scalar::one()];
-        assert_eq!(Scalar::from(3u32), calc_polynomial(&coefficients, &Scalar::one()));
+        let coefficients = vec![one, one, one];
+        assert_eq!(Scalar::from(3u32), calc_polynomial(&coefficients, &one));
         assert_eq!(Scalar::from(111u32), calc_polynomial(&coefficients, &Scalar::from(10u32)));
     }
 
     #[test]
     fn shamir_polynomial_medium() {
         let coefficients = vec![Scalar::from(1234u32), Scalar::from(2345u32), Scalar::from(3456u32)];
-        assert_eq!(Scalar::from(7035u32), calc_polynomial(&coefficients, &Scalar::one()));
+        assert_eq!(Scalar::from(7035u32), calc_polynomial(&coefficients, &one));
         assert_eq!(Scalar::from(19748u32), calc_polynomial(&coefficients, &Scalar::from(2u32)));
         assert_eq!(Scalar::from(3458346234u32), calc_polynomial(&coefficients, &Scalar::from(1000u32)));
     }
@@ -281,7 +286,7 @@ mod tests {
 
     #[test]
     fn shamir_reconstruct_bad_threshold() {
-        let shares = vec![Some(Scalar::from(272u32)), Some(Scalar::from(935u32)), Some(Scalar::from(1990u32))];
+        let shares = vec![first, second, third];
         let mut sham = Shamir::new_without_rng(4);
         match sham.reconstruct(&shares) {
             Ok(_) => assert!(false, "Should not have been able to reconstruct!"),
@@ -291,22 +296,20 @@ mod tests {
 
     #[test]
     fn shamir_reconstruct_easy() {
-        let secret = Scalar::one();
-        let shares = vec![Some(Scalar::from(272u32)), Some(Scalar::from(935u32)), Some(Scalar::from(1990u32))];
+        let shares = vec![first, second, third];
         let mut sham = Shamir::new_without_rng(shares.len());
         match sham.reconstruct(&shares) {
-            Ok(r1) => assert_eq!(secret, r1),
+            Ok(r1) => assert_eq!(one, r1),
             Err(e) => assert!(false, format!("Error reconstructing: {}", e)),
         }
     }
 
     #[test]
     fn shamir_reconstruct_easy_with_leftovers() {
-        let secret = Scalar::one();
-        let shares = vec![Some(Scalar::from(272u32)), Some(Scalar::from(935u32)), Some(Scalar::from(1990u32)), Some(Scalar::from(3437u32))];
+        let shares = vec![first, second, third, fourth];
         let mut sham = Shamir::new_without_rng(3);
         match sham.reconstruct(&shares) {
-            Ok(r1) => assert_eq!(secret, r1),
+            Ok(r1) => assert_eq!(one, r1),
             Err(e) => assert!(false, format!("Error reconstructing: {}", e)),
         }
     }
@@ -342,7 +345,7 @@ mod tests {
     #[test]
     fn shamir_reconstruct_bad_leftovers() {
         // the fourth point should be 3437 for proper reconstruction; altering it should cause failure
-        let shares = vec![Some(Scalar::from(272u32)), Some(Scalar::from(935u32)), Some(Scalar::from(1990u32)), Some(Scalar::from(3436u32))];
+        let shares = vec![first, second, third, ShamirShare { x: Scalar::from(4u32), y: Some(Scalar::from(3436u32))}];
         let mut sham = Shamir::new_without_rng(3);
         match sham.reconstruct(&shares) {
             Err(e) => assert!(e.contains("Not all values fit into reconstruction")),
@@ -354,11 +357,17 @@ mod tests {
     fn shamir_reconstruct_bad_in_threshold() {
         let mut rng = rand::thread_rng();
         let secret = Scalar::random(&mut rng);
+
         let mut sham = Shamir::new_without_rng(10);
         let shares = sham.share(&secret, 20);
         assert!(shares.is_ok());
+
         let mut shares = shares.unwrap();
-        shares[5] = if shares[5].unwrap() == Scalar::one() { Some(Scalar::zero()) } else { Some(Scalar::one()) };
+        shares[5] = match shares[5].y.unwrap() {
+            one => ShamirShare {x: Scalar::from(6u32), y: Some(Scalar::zero())},
+            _ => ShamirShare {x: Scalar::from(6u32), y: Some(Scalar::one())}
+        };
+
         match sham.reconstruct(&shares) {
             Err(e) => assert!(e.contains("Not all values fit into reconstruction")),
             Ok(_) => assert!(false, "Should not have been able to reconstruct!"),
@@ -383,15 +392,14 @@ mod tests {
 
     #[test]
     fn shamir_complete_easy() {
-        let secret = Scalar::one();
         // the missing element is 935
-        let yis = vec![Some(Scalar::from(272u32)), None, Some(Scalar::from(1990u32))];
+        let yis = vec![Some(first), None, Some(third)];
 
         let mut sham = Shamir::new_without_rng(3);
-        match sham.complete(&secret, &yis) {
+        match sham.complete(&one, &yis) {
             Ok(shares) => {
                 match sham.reconstruct(&shares) {
-                    Ok(maybe_secret) => assert_eq!(secret, maybe_secret),
+                    Ok(maybe_secret) => assert_eq!(one, maybe_secret),
                     Err(e) => assert!(false, "Completed the shares but couldn't reconstruct: {}", e),
                 }
             },
@@ -401,13 +409,17 @@ mod tests {
 
     #[test]
     fn shamir_complete_one() {
-        let secret = Scalar::one();
-        let yis = vec![Some(Scalar::one()); 4];
+        let yis = vec![
+            Some(ShamirShare { x: one,                y: Some(one) }),
+            Some(ShamirShare { x: Scalar::from(2u32), y: Some(one) }),
+            Some(ShamirShare { x: Scalar::from(3u32), y: Some(one) }),
+            Some(ShamirShare { x: Scalar::from(4u32), y: Some(one) }),
+        ];
         let mut sham = Shamir::new_without_rng(1);
-        match sham.complete(&secret, &yis) {
+        match sham.complete(&one, &yis) {
             Ok(shares) => {
-                for x in shares.iter() {
-                    assert_eq!(secret, x.unwrap());
+                for share in shares.iter() {
+                    assert_eq!(one, share.y.unwrap());
                 }
             },
             Err(e) => assert!(false, "Couldn't complete shares: {}", e),
@@ -416,11 +428,14 @@ mod tests {
 
     #[test]
     fn shamir_complete_one_bad() {
-        let secret = Scalar::one();
-        let mut yis = vec![Some(Scalar::one()); 4];
-        yis[3] = Some(Scalar::from(2u32));
+        let yis = vec![
+            Some(ShamirShare { x: one,                y: Some(one) }),
+            Some(ShamirShare { x: Scalar::from(2u32), y: Some(one) }),
+            Some(ShamirShare { x: Scalar::from(3u32), y: Some(one) }),
+            Some(ShamirShare { x: Scalar::from(4u32), y: Some(Scalar::from(2u32)) }),
+        ];
         let mut sham = Shamir::new_without_rng(1);
-        match sham.complete(&secret, &yis) {
+        match sham.complete(&one, &yis) {
             Ok(_) => assert!(false, "Should not have been able to complete"),
             Err(e) => assert!(e.contains("is not on the line")),
         }

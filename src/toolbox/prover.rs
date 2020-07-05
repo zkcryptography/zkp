@@ -6,8 +6,8 @@ use curve25519_dalek::traits::MultiscalarMul;
 
 use crate::toolbox::{SchnorrCS, TranscriptProtocol, IsSigmaProtocol};
 use crate::{BatchableProof, CompactProof, Transcript, ProofError};
-use crate::toolbox::shamir::Shamir;
-use crate::toolbox::secrets::SecretSharing;
+use crate::toolbox::shamir::{Shamir, ShamirShare};
+use crate::toolbox::secrets::{SecretSharing, Share};
 use std::iter;
 use std::str;
 use log::{trace, debug};
@@ -39,7 +39,7 @@ pub struct Prover<'a> {
     commitments: Vec<CompressedRistretto>,
     blindings: Vec<Option<Scalar>>,
     fake_responses: Vec<Option<Scalar>>,
-    known_chal_shares: Vec<Option<Scalar>>,
+    known_chal_shares: Vec<Option<Box<dyn Share>>>,
     nr_clauses: usize,
     challenge: Scalar,
 }
@@ -170,7 +170,7 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         // Commit to each blinded LHS
         let mut commitments = Vec::with_capacity(self.constraints.len());
         let mut fake_responses = Vec::with_capacity(self.constraints.iter().map(|cs| &cs.1).count());
-        let mut shares = Vec::with_capacity(self.constraints.len());
+        let mut shares: Vec<Option<Box<dyn Share>>> = Vec::with_capacity(self.constraints.len());
         let mut clause_tracker = vec![None; self.nr_clauses+1];
         // let mut prev_clause_nr = 0;
         for (clause_nr, lhs_var, rhs_lin_combo) in &self.constraints {
@@ -219,7 +219,7 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
                     };
 
                     let challenge = Scalar::random(&mut transcript_rng);
-                    shares.push(Some(challenge));
+                    shares.push( Some( Box::from(ShamirShare { x: Scalar::from(shares.len() as u8), y: Some(challenge) }) ) );
                     RistrettoPoint::multiscalar_mul(
                         rhs_lin_combo.iter()
                             .map(|(_sc_var, _pt_var)| {
@@ -282,7 +282,7 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         // threshold is the number of fake_responses which are Some(), plus one to account for the secret itself
         let threshold = 1 + self.known_chal_shares.iter().filter(|r| r.is_some()).count();
         let mut sham = Shamir::new(threshold, &mut rng);
-        let challenges = sham.complete(&self.challenge, &self.known_chal_shares).unwrap();
+        let challenges: Vec<Box<dyn Share>> = sham.complete(&self.challenge, &self.known_chal_shares).unwrap();
         let blindings = &self.blindings;
         let fake_responses = &self.fake_responses;
         let responses = self.scalars.iter().zip(blindings)
@@ -291,12 +291,12 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
             .map(| (((scalar, blinding), fake_response), challenge) | {
                 match fake_response.is_some() {
                     true => fake_response.unwrap(),
-                    false => scalar.unwrap() * challenge.unwrap() + blinding.unwrap(),
+                    false => scalar.unwrap() * challenge.get_value() + blinding.unwrap(),
                 }
             })
             .collect::<Vec<Scalar>>();
 
-        let out_shares = challenges.iter().map(|s| s.unwrap()).collect();
+        let out_shares = challenges.iter().map(|s| s.get_value()).collect();
         let commitments = self.commitments.clone();
         self.proof = BatchableProof{
             challenges: out_shares,
