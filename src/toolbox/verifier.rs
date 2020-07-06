@@ -118,12 +118,12 @@ impl<'a> Verifier<'a> {
         // Recompute the challenge and check if it's the claimed one
         let challenge = self.transcript.get_challenge(b"chal");
 
-        let shares = proof.challenges.clone().iter().map(|c| Some(*c)).collect();
+        // let shares = proof.challenges.clone();
 
         // threshold is the number of public keys NOT in the known signature group, plus at least one in the known signature group
         let threshold = (self.constraints.len() - 1) * self.constraints[0].1.len() + 1;
         let mut sham = Shamir::new_without_rng(threshold);
-        let rec_challenge = sham.reconstruct(&shares);
+        let rec_challenge = sham.reconstruct(&proof.challenges);
 
         if rec_challenge.is_ok() && challenge == rec_challenge.unwrap() {
             Ok(())
@@ -154,12 +154,12 @@ impl<'a> Verifier<'a> {
 
         let challenge = self.transcript.get_challenge(b"chal");
 
-        let shares = proof.challenges.clone().iter().map(|c| Some(*c)).collect();
+        // let shares = proof.challenges.clone();
 
         // threshold is the number of public keys NOT in the known signature group, plus at least one in the known signature group
         let threshold = (self.constraints.len() - 1) * self.constraints[0].1.len() + 1;
         let mut sham = Shamir::new_without_rng(threshold);
-        let rec_challenge = sham.reconstruct(&shares);
+        let rec_challenge = sham.reconstruct(&proof.challenges);
 
         if rec_challenge.is_ok() && challenge != rec_challenge.unwrap() {
             return Err(ProofError::VerificationFailure);

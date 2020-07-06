@@ -27,7 +27,7 @@ impl Xor<ThreadRng> {
 }
 
 impl<R> secrets::SecretSharing for Xor<R> where R: RngCore + CryptoRng {
-    fn share(&mut self, secret: &Scalar, nr_of_shares: usize) -> Result<Vec<Option<Scalar>>, String> {
+    fn share(&mut self, secret: &Scalar, nr_of_shares: usize) -> Result<Vec<Scalar>, String> {
         info!("Sharing {} pieces of {:?}", nr_of_shares, secret);
         let mut shares: Vec<Scalar> = Vec::new();
         
@@ -42,11 +42,11 @@ impl<R> secrets::SecretSharing for Xor<R> where R: RngCore + CryptoRng {
             Err(e) => return Err(e),
         }
 
-        return Ok(shares.iter().map(|s| Some(*s)).collect::<Vec<Option<Scalar>>>());
+        return Ok(shares);
     }
 
     /// For Xor, sparse_shares should include a None value for each share you want us to generate
-    fn complete(&mut self, secret: &Scalar, sparse_shares: &Vec<Option<Scalar>>) -> Result<Vec<Option<Scalar>>, String> {
+    fn complete(&mut self, secret: &Scalar, sparse_shares: &Vec<Option<Scalar>>) -> Result<Vec<Scalar>, String> {
         let mut empties = 0;
         let mut shares = Vec::new();
         for share in sparse_shares.iter() {
@@ -72,19 +72,17 @@ impl<R> secrets::SecretSharing for Xor<R> where R: RngCore + CryptoRng {
             Err(e) => return Err(e),
         }
 
-        return Ok(shares.iter().map(|s| Some(*s)).collect::<Vec<Option<Scalar>>>());
+        return Ok(shares);
     }
 
-    fn reconstruct(&mut self, shares: &Vec<Option<Scalar>>) -> Result<Scalar, String> {
+    fn reconstruct(&mut self, shares: &Vec<Scalar>) -> Result<Scalar, String> {
         if shares.len() < 1 {
             return Err(String::from("No shares provided, impossible to reconstruct!"));
         }
 
         info!("Reconstructing from {} shares", shares.len());
 
-        // this will panic if any of the shares are None...
-        let my_shares = shares.iter().map(|s| s.unwrap()).collect::<Vec<Scalar>>();
-        let secret = xor_many_scalars(&my_shares[0], &my_shares[1..].to_vec());
+        let secret = xor_many_scalars(&shares[0], &shares[1..].to_vec());
         
         debug!("Reconstructed {:?}", secret);
         return secret;
@@ -185,7 +183,7 @@ mod tests {
     #[test]
     fn xor_reconstruct() {
         let mut xor = Xor::new_without_rng();
-        let shares = vec![Some(Scalar::from(8675309u32)), Some(Scalar::from(5551212u32)), Some(Scalar::from(4561414u32))];
+        let shares = vec![Scalar::from(8675309u32), Scalar::from(5551212u32), Scalar::from(4561414u32)];
         match xor.reconstruct(&shares) {
             Ok(val) => assert_eq!(Scalar::from(9793927u32), val),
             Err(e) => assert!(false, format!("Error reconstructing secret: {}", e)),
@@ -198,8 +196,8 @@ mod tests {
         let sparse_shares = vec![Some(Scalar::from(123456789u32)), None];
         match xor.complete(&Scalar::one(), &sparse_shares) {
             Ok(shares) => {
-                assert_eq!(Scalar::from(123456789u32), shares[0].unwrap());
-                assert_eq!(Scalar::from(123456788u32), shares[1].unwrap());
+                assert_eq!(Scalar::from(123456789u32), shares[0]);
+                assert_eq!(Scalar::from(123456788u32), shares[1]);
             },
             Err(e) => assert!(false, format!("Error completing shares: {}", e))
         }
@@ -211,10 +209,10 @@ mod tests {
         let sparse_shares = vec![Some(Scalar::from(8675309u32)), Some(Scalar::from(5551212u32)), Some(Scalar::from(4561414u32)), None];
         match xor.complete(&Scalar::from(122778u32), &sparse_shares) {
             Ok(shares) => {
-                assert_eq!(Scalar::from(8675309u32), shares[0].unwrap());
-                assert_eq!(Scalar::from(5551212u32), shares[1].unwrap());
-                assert_eq!(Scalar::from(4561414u32), shares[2].unwrap());
-                assert_eq!(Scalar::from(9743901u32), shares[3].unwrap());
+                assert_eq!(Scalar::from(8675309u32), shares[0]);
+                assert_eq!(Scalar::from(5551212u32), shares[1]);
+                assert_eq!(Scalar::from(4561414u32), shares[2]);
+                assert_eq!(Scalar::from(9743901u32), shares[3]);
             },
             Err(e) => assert!(false, format!("Error completing shares: {}", e)),
         }
@@ -229,11 +227,8 @@ mod tests {
                 assert_eq!(sparse_shares.len(), shares.len());
                 let mut found = false;
                 for s in shares.iter() {
-                    // make sure they're all filled in
-                    assert_ne!(None, *s);
-
                     // make sure our one original share is in there somewhere
-                    if sparse_shares[5].unwrap() == s.unwrap() {
+                    if sparse_shares[5].unwrap() == *s {
                         found = true;
                     }
                 }

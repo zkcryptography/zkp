@@ -291,12 +291,12 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
             .map(| (((scalar, blinding), fake_response), challenge) | {
                 match fake_response.is_some() {
                     true => fake_response.unwrap(),
-                    false => scalar.unwrap() * challenge.unwrap() + blinding.unwrap(),
+                    false => scalar.unwrap() * challenge + blinding.unwrap(),
                 }
             })
             .collect::<Vec<Scalar>>();
 
-        let out_shares = challenges.iter().map(|s| s.unwrap()).collect();
+        let out_shares = challenges;
         let commitments = self.commitments.clone();
         self.proof = BatchableProof{
             challenges: out_shares,
