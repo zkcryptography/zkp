@@ -333,7 +333,7 @@ fn or_test_wrong_keys() {
         let A = &x * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
         let B = &y * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
         let C = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
-        let D = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let D = &Scalar::from(4u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
 
         let mut transcript = Transcript::new(b"Or Clause Test");
         complex_or_clause::prove_compact(
@@ -375,3 +375,5 @@ fn or_test_wrong_keys() {
         },
     }
 }
+
+// TODO need to test what the verifier would do if we had a statement like complex_or but only had keys for A and C

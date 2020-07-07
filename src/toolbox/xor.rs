@@ -2,7 +2,7 @@ use curve25519_dalek::scalar::Scalar;
 use rand::{CryptoRng, RngCore};
 use rand::prelude::ThreadRng;
 use crate::toolbox::secrets;
-use log::{debug, info};
+use log::{trace, debug, info};
 
 /// A SecretSharing implementation that is based on the all-shares XOR method.  In particular, you must have every outstanding share
 /// of a secret in order to reconstruct that secret.  Because it is the simplest method, it has no interesting parameters.
@@ -49,10 +49,15 @@ impl<R> secrets::SecretSharing for Xor<R> where R: RngCore + CryptoRng {
     fn complete(&mut self, secret: &Scalar, sparse_shares: &Vec<Option<Scalar>>) -> Result<Vec<Scalar>, String> {
         let mut empties = 0;
         let mut shares = Vec::new();
+        let mut new_shares = Vec::new();
         for share in sparse_shares.iter() {
             if share.is_some() {
                 shares.push(share.unwrap());
             } else {
+                if empties != 0 {     // the "zero-th" empty will be the one we have to XOR-calculate
+                    trace!("Pushing a random Scalar to extra empty");
+                    new_shares.push(Scalar::random(&mut self.rng));
+                }
                 empties += 1;
             }
         }
@@ -63,16 +68,24 @@ impl<R> secrets::SecretSharing for Xor<R> where R: RngCore + CryptoRng {
 
         info!("Completing {} empties with {} known and secret = {:?}", empties, shares.len(), secret);
 
-        // the "zero-th" empty will be the one we have to XOR-calculate
-        for _ in 1..empties {
-            shares.push(Scalar::random(&mut self.rng));
-        }
-        match xor_many_scalars(secret, &shares) {
-            Ok(val) => shares.push(val),
+        match xor_many_more_scalars(secret, &shares, &new_shares) {
+            Ok(val) => {
+                debug!("The XOR'd share is {:?}", val);
+                new_shares.push(val);
+            },
             Err(e) => return Err(e),
         }
 
-        return Ok(shares);
+        let ret_shares: Vec<Scalar> = sparse_shares.iter().map(|x| {
+            if x.is_some() {
+                x.unwrap()
+            } else {
+                // it's OK to panic if we get a None here, since that should *never* happen
+                new_shares.pop().unwrap()
+            }
+        }).collect();
+
+        return Ok(ret_shares);
     }
 
     fn reconstruct(&mut self, shares: &Vec<Scalar>) -> Result<Scalar, String> {
@@ -80,11 +93,9 @@ impl<R> secrets::SecretSharing for Xor<R> where R: RngCore + CryptoRng {
             return Err(String::from("No shares provided, impossible to reconstruct!"));
         }
 
-        info!("Reconstructing from {} shares", shares.len());
-
-        let secret = xor_many_scalars(&shares[0], &shares[1..].to_vec());
+        let secret = xor_many_scalars(&shares[0], &shares[1..]);
         
-        debug!("Reconstructed {:?}", secret);
+        debug!("Used {} shares to reconstruct {:?}", shares.len(), secret);
         return secret;
     }
 }
@@ -105,13 +116,29 @@ pub fn xor_scalars(a: &Scalar, b: &Scalar) -> Scalar {
 /// push it.
 /// 
 /// TODO WARNING: the result isn't guaranteed to be modulo group order.  Is that going to be a problem?
-pub fn xor_many_scalars(first: &Scalar, others: &Vec<Scalar>) -> Result<Scalar, String> {
-    if others.len() < 1 {
-        return Err(String::from("Vector was empty, impossible to XOR anything"));
-    }
-    // each Scalar is 32 bytes
+/// TODO is there a special way we need to write this function, to achieve some sort of SIMD benefit?
+pub fn xor_many_scalars(first: &Scalar, others: &[Scalar]) -> Result<Scalar, String> {
     let mut the_bytes = first.clone().to_bytes();
     for scalar in others.iter() {
+        let scal_bytes = scalar.to_bytes();
+        for i in 0..the_bytes.len() {
+            the_bytes[i] ^= scal_bytes[i];
+        }
+    }
+
+    return Ok(Scalar::from_bits(the_bytes));
+}
+
+/// See xor_many_scalars()
+pub fn xor_many_more_scalars(first: &Scalar, others: &Vec<Scalar>, still_others: &Vec<Scalar>) -> Result<Scalar, String> {
+    let mut the_bytes = first.clone().to_bytes();
+    for scalar in others.iter() {
+        let scal_bytes = scalar.to_bytes();
+        for i in 0..the_bytes.len() {
+            the_bytes[i] ^= scal_bytes[i];
+        }
+    }
+    for scalar in still_others.iter() {
         let scal_bytes = scalar.to_bytes();
         for i in 0..the_bytes.len() {
             the_bytes[i] ^= scal_bytes[i];

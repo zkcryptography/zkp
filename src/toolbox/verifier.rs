@@ -1,13 +1,18 @@
 use rand::{thread_rng, Rng};
-use std::iter;
+
+use std::collections::HashMap;
+use std::{iter, str};
+
+use log::{trace, debug};
 
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::traits::{IsIdentity, VartimeMultiscalarMul};
 
-use crate::toolbox::{SchnorrCS, TranscriptProtocol};
+use crate::toolbox::{SchnorrCS, TranscriptProtocol, ProofType};
 use crate::{BatchableProof, CompactProof, ProofError, Transcript};
 use crate::toolbox::shamir::Shamir;
+use crate::toolbox::xor::Xor;
 use crate::toolbox::secrets::SecretSharing;
 
 /// Used to produce verification results.
@@ -30,8 +35,9 @@ pub struct Verifier<'a> {
     num_scalars: usize,
     points: Vec<CompressedRistretto>,
     point_labels: Vec<&'static [u8]>,
-    constraints: Vec<(PointVar, Vec<(ScalarVar, PointVar)>)>,
+    constraints: Vec<(usize, PointVar, Vec<(ScalarVar, PointVar)>)>,
     subroutines: Vec<Verifier<'a>>,
+    // proof_type: ProofType,
 }
 
 /// A secret variable used during verification.
@@ -56,11 +62,13 @@ impl<'a> Verifier<'a> {
             point_labels: Vec::default(),
             constraints: Vec::default(),
             subroutines: Vec::default(),
+            // proof_type: ProofType::Unknown,
         }
     }
 
     /// Allocate a placeholder scalar variable, without an assignment.
     pub fn allocate_scalar(&mut self, label: &'static [u8]) -> ScalarVar {
+        trace!("Allocating scalar {}", str::from_utf8(label).unwrap());
         self.transcript.append_scalar_var(label);
         self.num_scalars += 1;
         ScalarVar(self.num_scalars - 1)
@@ -73,6 +81,7 @@ impl<'a> Verifier<'a> {
         label: &'static [u8],
         assignment: CompressedRistretto,
     ) -> Result<PointVar, ProofError> {
+        trace!("Allocating point {}", str::from_utf8(label).unwrap());
         self.transcript
             .validate_and_append_point_var(label, &assignment)?;
         self.points.push(assignment);
@@ -87,6 +96,9 @@ impl<'a> Verifier<'a> {
             return Err(ProofError::IncorrectResponseNumber);
         }
 
+        // TODO have to decide what type of proof this is
+        let proof_type = ProofType::Xor;
+
         // Decompress all parameters or fail verification.
         let points = self
             .points
@@ -95,35 +107,86 @@ impl<'a> Verifier<'a> {
             .collect::<Option<Vec<RistrettoPoint>>>()
             .ok_or(ProofError::DecompressionError)?;
 
-        // Recompute the prover's commitments based on their claimed challenge value:
-        for (index, (lhs_var, rhs_lc)) in self.constraints.iter().enumerate() {
-            let minus_c = -proof.challenges[index];
-            let commitment = RistrettoPoint::vartime_multiscalar_mul(
-                rhs_lc
-                    .iter()
-                    .map(|(sc_var, _pt_var)| {
-                        proof.responses[sc_var.0]
-                    })
-                    .chain(iter::once(minus_c)),
-                rhs_lc
-                    .iter()
-                    .map(|(_sc_var, pt_var)| points[pt_var.0])
-                    .chain(iter::once(points[lhs_var.0])),
-            );
+        let rec_challenge: Result<Scalar, String>;
 
-            self.transcript
-                .append_blinding_commitment(self.point_labels[lhs_var.0], &commitment);
-        }
+        match proof_type {
+            ProofType::Shamir => {
+                // Recompute the prover's commitments based on their claimed challenge value:
+                for (index, (_, lhs_var, rhs_lc)) in self.constraints.iter().enumerate() {
+                    debug!("Looking up challenge for index {}", index);
+                    let minus_c = -proof.challenges[index];
+                    let commitment = RistrettoPoint::vartime_multiscalar_mul(
+                        rhs_lc
+                            .iter()
+                            .map(|(sc_var, _pt_var)| {
+                                proof.responses[sc_var.0]
+                            })
+                            .chain(iter::once(minus_c)),
+                        rhs_lc
+                            .iter()
+                            .map(|(_sc_var, pt_var)| points[pt_var.0])
+                            .chain(iter::once(points[lhs_var.0])),
+                    );
 
-        // Recompute the challenge and check if it's the claimed one
+                    let encoding = self.transcript
+                        .append_blinding_commitment(self.point_labels[lhs_var.0], &commitment);
+                    trace!("Appending blinding {:?}", encoding);
+                }
+
+                // threshold is the number of public keys NOT in the known signature group, plus at least one in the known signature group
+                let threshold = (self.constraints.len() - 1) * self.constraints[0].2.len() + 1;
+                let mut sham = Shamir::new_without_rng(threshold);
+                rec_challenge = sham.reconstruct(&proof.challenges);
+            },
+            ProofType::Xor => {
+                let mut clause_challenges: HashMap<usize, Scalar> = HashMap::new();
+                // Recompute the prover's commitments based on their claimed challenge value:
+                for (index, (clause_nr, lhs_var, rhs_lc)) in self.constraints.iter().enumerate() {
+                    let c = proof.challenges[index];
+                    trace!("Verifier challenge for index {} is  {:?}", index, c);
+                    match clause_challenges.get(clause_nr) {
+                        Some(cc) => {
+                            // check to make sure this challenge meets what we expect for this clause
+                            if *cc != c {
+                                return Err(ProofError::VerificationFailure);
+                            }
+                        },
+                        None => {
+                            clause_challenges.insert(*clause_nr, c);
+                        }
+                    }
+                    let minus_c = -c;
+                    let commitment = RistrettoPoint::vartime_multiscalar_mul(
+                        rhs_lc
+                            .iter()
+                            .map(|(sc_var, _pt_var)| {
+                                proof.responses[sc_var.0]
+                            })
+                            .chain(iter::once(minus_c)),
+                        rhs_lc
+                            .iter()
+                            .map(|(_sc_var, pt_var)| points[pt_var.0])
+                            .chain(iter::once(points[lhs_var.0])),
+                    );
+
+                    let encoding = self.transcript
+                        .append_blinding_commitment(self.point_labels[lhs_var.0], &commitment);
+                    trace!("Appending blinding {:?}", encoding);
+                }
+
+                let mut xor = Xor::new_without_rng();
+
+                // we only have a challenge per clause, not constraint, so we have to find only the unique challenges
+                let challenges = clause_challenges.values().map(|s| *s).collect();
+                rec_challenge = xor.reconstruct(&challenges);
+            },
+            _ => {
+                panic!("This isn't implemented yet!");
+            }
+        };
+
         let challenge = self.transcript.get_challenge(b"chal");
-
-        // let shares = proof.challenges.clone();
-
-        // threshold is the number of public keys NOT in the known signature group, plus at least one in the known signature group
-        let threshold = (self.constraints.len() - 1) * self.constraints[0].1.len() + 1;
-        let mut sham = Shamir::new_without_rng(threshold);
-        let rec_challenge = sham.reconstruct(&proof.challenges);
+        trace!("Verifier's transcript challenge is {:?}", challenge);
 
         if rec_challenge.is_ok() && challenge == rec_challenge.unwrap() {
             Ok(())
@@ -143,23 +206,61 @@ impl<'a> Verifier<'a> {
             return Err(ProofError::VerificationFailure);
         }
 
-        // Feed the prover's commitments into the transcript:
-        for (i, commitment) in proof.commitments.iter().enumerate() {
-            let (ref lhs_var, ref _rhs_lc) = self.constraints[i];
-            self.transcript.validate_and_append_blinding_commitment(
-                self.point_labels[lhs_var.0],
-                &commitment,
-            )?;
-        }
+        // TODO automatic decision of what proof type to verify
+        let proof_type = ProofType::Xor;
+
+        let rec_challenge: Result<Scalar, String>;
+        match proof_type {
+            ProofType::Shamir => {
+                // Feed the prover's commitments into the transcript:
+                for (i, commitment) in proof.commitments.iter().enumerate() {
+                    let (_, ref lhs_var, ref _rhs_lc) = self.constraints[i];
+                    self.transcript.validate_and_append_blinding_commitment(
+                        self.point_labels[lhs_var.0],
+                        &commitment,
+                    )?;
+                }
+                
+                // threshold is the number of public keys NOT in the known signature group, plus at least one in the known signature group
+                let threshold = (self.constraints.len() - 1) * self.constraints[0].2.len() + 1;
+                let mut sham = Shamir::new_without_rng(threshold);
+                rec_challenge = sham.reconstruct(&proof.challenges);
+            },
+            ProofType::Xor => {
+                let mut clause_challenges: HashMap<usize, Scalar> = HashMap::new();
+
+                // Feed the prover's commitments into the transcript:
+                for (i, commitment) in proof.commitments.iter().enumerate() {
+                    let (ref clause_nr, ref lhs_var, ref _rhs_lc) = self.constraints[i];
+                    self.transcript.validate_and_append_blinding_commitment(
+                        self.point_labels[lhs_var.0],
+                        &commitment,
+                    )?;
+
+                    let c = proof.challenges[i];
+                    match clause_challenges.get(clause_nr) {
+                        Some(cc) => {
+                            // check to make sure this challenge meets what we expect for this clause
+                            if *cc != c {
+                                return Err(ProofError::VerificationFailure);
+                            }
+                        },
+                        None => {
+                            clause_challenges.insert(*clause_nr, c);
+                        }
+                    }
+                }
+
+                let challenges = clause_challenges.values().map(|s| *s).collect();
+                let mut xor = Xor::new_without_rng();
+                rec_challenge = xor.reconstruct(&challenges);
+            },
+            _ => {
+                panic!("This isn't implemented yet!");
+            }
+        };
 
         let challenge = self.transcript.get_challenge(b"chal");
-
-        // let shares = proof.challenges.clone();
-
-        // threshold is the number of public keys NOT in the known signature group, plus at least one in the known signature group
-        let threshold = (self.constraints.len() - 1) * self.constraints[0].1.len() + 1;
-        let mut sham = Shamir::new_without_rng(threshold);
-        let rec_challenge = sham.reconstruct(&proof.challenges);
 
         if rec_challenge.is_ok() && challenge != rec_challenge.unwrap() {
             return Err(ProofError::VerificationFailure);
@@ -173,7 +274,7 @@ impl<'a> Verifier<'a> {
         // we want to ensure Q_com = sum(P_i, resp_i) - c * Q,
         // so add the check rand*( sum(P_i, resp_i) - c * Q - Q_com ) == 0
         for i in 0..self.constraints.len() {
-            let (ref lhs_var, ref rhs_lc) = self.constraints[i];
+            let (_, ref lhs_var, ref rhs_lc) = self.constraints[i];
             let random_factor = Scalar::from(thread_rng().gen::<u128>());
             let minus_c = -proof.challenges[i];
 
@@ -203,8 +304,8 @@ impl<'a> SchnorrCS for Verifier<'a> {
     type PointVar = PointVar;
     type SubroutineVar = Verifier<'a>;
 
-    fn constrain(&mut self, _clause_nr: usize, lhs: PointVar, linear_combination: Vec<(ScalarVar, PointVar)>) {
-        self.constraints.push((lhs, linear_combination));
+    fn constrain(&mut self, clause_nr: usize, lhs: PointVar, linear_combination: Vec<(ScalarVar, PointVar)>) {
+        self.constraints.push((clause_nr, lhs, linear_combination));
     }
 
     fn add_subroutine(&mut self, subroutine: Verifier<'a>) {

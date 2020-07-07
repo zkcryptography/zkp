@@ -100,7 +100,6 @@ fn and_test_adv_wrong() {
     );
     assert!(ver.is_err());
     assert_eq!(ver.unwrap_err(), ProofError::VerificationFailure);
-
 }
 
 #[test]
@@ -158,7 +157,7 @@ fn and_test_complex() {
     }
 }
 
-
+// TODO we need to figure out what the verifier would do if such a prover could be built
 #[test]
 fn and_test_insufficient_keys() {
     init();
@@ -181,4 +180,46 @@ fn and_test_insufficient_keys() {
         )
     };
     assert!(res.is_err(), "Shouldn't have been able to build a prover");
+}
+
+#[test]
+fn and_test_adv_none() {
+    init();
+    // Prover's scope
+    let (proof, points) = {
+        let x = Scalar::from(89327492234u64).invert();
+        let y = Scalar::from(8675309u64);
+        let A = &Scalar::from(6u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let B = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+
+        let mut transcript = Transcript::new(b"And Clause Test");
+        basic_and_clause::prove_compact(
+            &mut transcript,
+            basic_and_clause::ProveAssignments {
+                x: &Some(x),
+                y: &Some(y),
+                A: &A,
+                B: &B,
+                G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
+            },
+        ).unwrap()
+    };
+
+    // Serialize and parse bincode representation
+    let proof_bytes = bincode::serialize(&proof).unwrap();
+    let parsed_proof: basic_and_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+
+    // Verifier logic
+    let mut transcript = Transcript::new(b"And Clause Test");
+    let ver = basic_and_clause::verify_compact(
+        &parsed_proof,
+        &mut transcript,
+        basic_and_clause::VerifyAssignments {
+            A: &points.A,
+            B: &points.B,
+            G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
+        },
+    );
+    assert!(ver.is_err());
+    assert_eq!(ver.unwrap_err(), ProofError::VerificationFailure);
 }
