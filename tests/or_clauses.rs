@@ -1,21 +1,21 @@
-extern crate rand;
+#![allow(non_snake_case)]
 
+extern crate rand;
 use rand::{thread_rng, CryptoRng, RngCore};
 
 extern crate curve25519_dalek;
-
 use curve25519_dalek::constants as dalek_constants;
 use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::scalar::Scalar;
 
 #[macro_use]
 extern crate zkp;
-
 pub use zkp::Transcript;
 use zkp::ProofError;
 
 
-define_proof! {or_clause_test, "or_clause_test", (x,y), (A, B, G), () : A = (G ^ x) || B = (G ^ y)}
+define_proof! {basic_or_clause, "basic_or_clause", (x,y), (A, B, G), () : A = (G ^ x) || B = (G ^ y)}
+define_proof! {complex_or_clause, "complex_or_clause", (x, y, z, a), (A, B, C, D, G), (): A = (G^x) && B = (G^y) || C = (G^z) && D = (G^a)}
 
 /// Defines how the construction interacts with the transcript.
 trait TranscriptProtocol {
@@ -68,7 +68,7 @@ impl From<(SecretKey, SecretKey)> for KeyPair {
     }
 }
 
-pub struct Signature(or_clause_test::CompactProof);
+pub struct Signature(basic_or_clause::CompactProof);
 
 impl KeyPair {
     fn public_key(&self) -> (PublicKey, PublicKey) {
@@ -77,9 +77,9 @@ impl KeyPair {
 
     fn sign(&self, clause: usize, message: &[u8], sig_transcript: &mut Transcript) -> Signature {
         sig_transcript.append_message_example(message);
-        let result = or_clause_test::prove_compact(
+        let result = basic_or_clause::prove_compact(
             sig_transcript,
-            or_clause_test::ProveAssignments {
+            basic_or_clause::ProveAssignments {
                 x: &match clause == 1 { true => Some(self.sk1.0), false => None },
                 y: &match clause == 2 { true => Some(self.sk2.0), false => None },
                 A: &self.pk1.0,
@@ -87,9 +87,7 @@ impl KeyPair {
                 G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
             },
         );
-        if result.is_err() {
-            println!("{}", result.as_ref().err().unwrap());
-        }
+        assert!(result.is_ok(), format!("{}", result.as_ref().err().unwrap()));
 
         let (proof, _points) = result.unwrap();
         return Signature(proof);
@@ -105,10 +103,10 @@ impl Signature {
         sig_transcript: &mut Transcript,
     ) -> Result<(), ProofError> {
         sig_transcript.append_message_example(message);
-        or_clause_test::verify_compact(
+        basic_or_clause::verify_compact(
             &self.0,
             sig_transcript,
-            or_clause_test::VerifyAssignments {
+            basic_or_clause::VerifyAssignments {
                 A: &pubkey1.1,
                 B: &pubkey2.1,
                 G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
@@ -118,8 +116,13 @@ impl Signature {
     }
 }
 
+fn init() {
+    let _ = env_logger::builder().is_test(true).try_init();
+}
+
 #[test]
 fn create_and_verify_or_sig() {
+    init();
     let domain_sep = b"My Sig Application";
     let msg1 = b"Test Message 1";
     let msg2 = b"Test Message 2";
@@ -192,4 +195,184 @@ fn create_and_verify_or_sig() {
     assert!(sig4
         .verify(msg2, &pk2.0, &pk2.1, &mut Transcript::new(b"Wrong"))
         .is_err());
+}
+
+#[test]
+fn or_test_basic() {
+    init();
+    // Prover's scope
+    let (proof, points) = {
+        let x = Scalar::from(89327492234u64).invert();
+        let y = None;
+        let A = &x * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let B = &Scalar::from(7u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+
+        let mut transcript = Transcript::new(b"Or Clause Test");
+        basic_or_clause::prove_compact(
+            &mut transcript,
+            basic_or_clause::ProveAssignments {
+                x: &Some(x),
+                y: &y,
+                A: &A,
+                B: &B,
+                G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
+            },
+        ).unwrap()
+    };
+
+    // Serialize and parse bincode representation
+    let proof_bytes = bincode::serialize(&proof).unwrap();
+    let parsed_proof: basic_or_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+
+    // Verifier logic
+    let mut transcript = Transcript::new(b"Or Clause Test");
+    assert!(basic_or_clause::verify_compact(
+        &parsed_proof,
+        &mut transcript,
+        basic_or_clause::VerifyAssignments {
+            A: &points.A,
+            B: &points.B,
+            G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
+        },
+    )
+    .is_ok());
+}
+
+#[test]
+fn or_test_complex() {
+    init();
+    // Prover's scope
+    let res = {
+        let x = Scalar::from(89327492234u64).invert();
+        let y = Scalar::from(8675309u32);
+        let A = &x * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let B = &y * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let C = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let D = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+
+        let mut transcript = Transcript::new(b"Or Clause Test");
+        complex_or_clause::prove_compact(
+            &mut transcript,
+            complex_or_clause::ProveAssignments {
+                x: &Some(x),
+                y: &Some(y),
+                z: &None,
+                a: &None,
+                A: &A,
+                B: &B,
+                C: &C,
+                D: &D,
+                G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
+            },
+        )
+    };
+    match res {
+        Err(e) => assert!(false, format!("Error building proof: {}", e)),
+        Ok((proof, points)) => {
+            // Serialize and parse bincode representation
+            let proof_bytes = bincode::serialize(&proof).unwrap();
+            let parsed_proof: complex_or_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+
+            // Verifier logic
+            let mut transcript = Transcript::new(b"Or Clause Test");
+            let ver = complex_or_clause::verify_compact(
+                &parsed_proof,
+                &mut transcript,
+                complex_or_clause::VerifyAssignments {
+                    A: &points.A,
+                    B: &points.B,
+                    C: &points.C,
+                    D: &points.D,
+                    G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
+                },
+            );
+            assert!(ver.is_ok(), format!("Error verifying proof: {}", ver.unwrap_err()));
+        },
+    }
+}
+
+
+#[test]
+fn or_test_insufficient_keys() {
+    init();
+    // Prover's scope
+    let res = {
+        let x = Scalar::from(89327492234u64).invert();
+        let y = Scalar::from(8675309u32);
+        let A = &x * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let B = &y * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let C = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let D = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+
+        let mut transcript = Transcript::new(b"Or Clause Test");
+        complex_or_clause::prove_compact(
+            &mut transcript,
+            complex_or_clause::ProveAssignments {
+                x: &Some(x),
+                y: &None,
+                z: &None,
+                a: &None,
+                A: &A,
+                B: &B,
+                C: &C,
+                D: &D,
+                G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
+            },
+        )
+    };
+    assert!(res.is_err(), "Shouldn't have been able to build this prover!");
+}
+
+#[test]
+fn or_test_wrong_keys() {
+    init();
+    // Prover's scope
+    let res = {
+        let x = Scalar::from(89327492234u64).invert();
+        let y = Scalar::from(8675309u32);
+        let z = Scalar::from(654u32);
+        let A = &x * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let B = &y * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let C = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+        let D = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
+
+        let mut transcript = Transcript::new(b"Or Clause Test");
+        complex_or_clause::prove_compact(
+            &mut transcript,
+            complex_or_clause::ProveAssignments {
+                x: &Some(x),
+                y: &Some(z),
+                z: &None,
+                a: &None,
+                A: &A,
+                B: &B,
+                C: &C,
+                D: &D,
+                G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
+            },
+        )
+    };
+    match res {
+        Err(e) => assert!(false, "Error building proof: {}", e),
+        Ok((proof, points)) => {
+            // Serialize and parse bincode representation
+            let proof_bytes = bincode::serialize(&proof).unwrap();
+            let parsed_proof: complex_or_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+
+            // Verifier logic
+            let mut transcript = Transcript::new(b"Or Clause Test");
+            let ver = complex_or_clause::verify_compact(
+                &parsed_proof,
+                &mut transcript,
+                complex_or_clause::VerifyAssignments {
+                    A: &points.A,
+                    B: &points.B,
+                    C: &points.C,
+                    D: &points.D,
+                    G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
+                },
+            );
+            assert!(ver.is_err(), "This proof should not have validated!");
+        },
+    }
 }

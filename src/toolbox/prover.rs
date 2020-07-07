@@ -6,8 +6,11 @@ use curve25519_dalek::traits::MultiscalarMul;
 
 use crate::toolbox::{SchnorrCS, TranscriptProtocol, IsSigmaProtocol};
 use crate::{BatchableProof, CompactProof, Transcript, ProofError};
-use crate::toolbox::shamir_secrets::SecretShare;
+use crate::toolbox::shamir::Shamir;
+use crate::toolbox::secrets::SecretSharing;
 use std::iter;
+use std::str;
+use log::{trace, debug};
 
 /// Used to create proofs.
 ///
@@ -37,15 +40,16 @@ pub struct Prover<'a> {
     blindings: Vec<Option<Scalar>>,
     fake_responses: Vec<Option<Scalar>>,
     known_chal_shares: Vec<Option<Scalar>>,
+    nr_clauses: usize,
     challenge: Scalar,
 }
 
 /// A secret variable used during proving.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct ScalarVar(usize);
 
 /// A public variable used during proving.
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct PointVar(usize);
 
 impl<'a> Prover<'a> {
@@ -65,12 +69,14 @@ impl<'a> Prover<'a> {
             blindings: Vec::default(),
             fake_responses: Vec::default(),
             known_chal_shares: Vec::default(),
+            nr_clauses: 0,
             challenge: Default::default()
         }
     }
 
-    /// Allocate and assign a secret variable with the given `label`.
+    /// Allocate and assign a secret variable with the given `label`.  It returns the index of this new ScalarVar in the scalars Vector.
     pub fn allocate_scalar(&mut self, label: &'static [u8], assignment: Option<Scalar>) -> ScalarVar {
+        trace!("Allocating scalar {}", str::from_utf8(label).unwrap());
         self.transcript.append_scalar_var(label);
         self.scalars.push(assignment);
         ScalarVar(self.scalars.len() - 1)
@@ -86,6 +92,7 @@ impl<'a> Prover<'a> {
         label: &'static [u8],
         assignment: RistrettoPoint,
     ) -> (PointVar, CompressedRistretto) {
+        trace!("Allocating point {}", str::from_utf8(label).unwrap());
         let compressed = self.transcript.append_point_var(label, &assignment);
         self.points.push(assignment);
         self.point_labels.push(label);
@@ -94,6 +101,10 @@ impl<'a> Prover<'a> {
 
     /// The compact and batchable proofs differ only by which data they store.
     fn prove_impl(mut self) -> Result<BatchableProof, ProofError> {
+        self.nr_clauses = match self.constraints.last() {
+            None => 0,
+            Some(x) => x.0,
+        };
         let result = self.commit();
         if result.is_err() {
             return Err(result.err().unwrap());
@@ -126,7 +137,6 @@ impl<'a> Prover<'a> {
             true => result.unwrap(),
             false => return Err(result.err().unwrap())
         };
-
 
         Ok(proof)
     }
@@ -161,27 +171,53 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         let mut commitments = Vec::with_capacity(self.constraints.len());
         let mut fake_responses = Vec::with_capacity(self.constraints.iter().map(|cs| &cs.1).count());
         let mut shares = Vec::with_capacity(self.constraints.len());
-        let mut prev_clause_nr = 0;
+        let mut clause_tracker = vec![None; self.nr_clauses+1];
+        // let mut prev_clause_nr = 0;
         for (clause_nr, lhs_var, rhs_lin_combo) in &self.constraints {
+            debug!("Constraint clause {}: {} = {}",
+                clause_nr,
+                str::from_utf8(self.point_labels[lhs_var.0]).unwrap(),
+                rhs_lin_combo.iter().map(
+                    |(scal, pt)| format!("{} ^ {:?}", str::from_utf8(self.point_labels[pt.0]).unwrap(), scal.0)
+                ).collect::<Vec<String>>().join(" * ")
+            );
+
+            // The first [0] picks the first entry in the linear combination.  We can test against only this one because we
+            // know that all entries in a compound && clause (represented by a single constraint) MUST either be all known, or
+            // all unknown.  Though, we should have a way of checking this in the code before execution reaches this point.
+            // The second .0 pulls out the ScalarVar which the PointVar is to be raised to.  The third .0 selects the single entry
+            // of the ScalarVar tuple, which is a usize representing the index of the ScalarVar's value in self.scalars and self.blindings.
             let sv_index = (rhs_lin_combo[0].0).0;
             let commitment = match blindings[sv_index].is_some() {
                 true => {               // if we have a blinding, that means we have a secret value for this variable
-                    if prev_clause_nr == 0 {
-                        prev_clause_nr = *clause_nr;
-                    }
-                    if prev_clause_nr != *clause_nr {
-                        return Err(ProofError::InputMismatch);
-                    }
+                    clause_tracker[*clause_nr] = match clause_tracker[*clause_nr] {
+                        // this is the first time we've worked with this clause, initialize the tracker
+                        None => Some((1, 1)),
+
+                        // We're adding a new known value, so increment the tracker
+                        Some((terms, filled_in)) => Some((terms+1, filled_in+1)),
+                    };
+
                     shares.push(None);
                     RistrettoPoint::multiscalar_mul(
                         rhs_lin_combo.iter().map(|(sc_var, _pt_var)| {
                             fake_responses.push(None);
                             blindings[sc_var.0].unwrap()
                         }),
-                        rhs_lin_combo.iter().map(|(_sc_var, pt_var)| self.points[pt_var.0]),
+                        rhs_lin_combo.iter().map(|(_sc_var, pt_var)| {
+                            self.points[pt_var.0]
+                        }),
                     )
                 }
                 false => {              // if we don't have a blinding, we don't have a secret value and will be faking one
+                    clause_tracker[*clause_nr] = match clause_tracker[*clause_nr] {
+                        // this is the first time we've worked with this clause, initialize the tracker
+                        None => Some((1, 0)),
+
+                        // we've added no new information here, so just count a new clause
+                        Some((terms, filled_in)) => Some((terms+1, filled_in)),
+                    };
+
                     let challenge = Scalar::random(&mut transcript_rng);
                     shares.push(Some(challenge));
                     RistrettoPoint::multiscalar_mul(
@@ -205,6 +241,22 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
 
             commitments.push(encoding);
         }
+
+        // Now that we know all the clauses, make sure at least one is full
+        let mut have_one = false;
+        for (i, clause) in clause_tracker.iter().enumerate() {
+            match clause {
+                Some((terms, filled_in)) => {
+                    debug!("Clause {} has {} terms and we know {} keys", i, terms, filled_in);
+                    if terms == filled_in { have_one = true; break; }
+                },
+                None => (),
+            }
+        }
+        if !have_one {
+            return Err(ProofError::InsufficientKeys)
+        }
+        
         self.blindings = blindings;
         self.commitments = commitments;
         self.fake_responses = fake_responses;
@@ -213,26 +265,38 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
     }
 
     fn challenge(&mut self) {
-        self.challenge = self.transcript.get_challenge(b"chal")
+        self.challenge = self.transcript.get_challenge(b"chal");
     }
 
     fn response(&mut self) {
+        // Construct a TranscriptRng
+        // let mut rng_builder = self.transcript.build_rng();
+        // for scalar in &self.scalars {
+        //     if scalar.is_some() {
+        //         rng_builder = rng_builder.rekey_with_witness_bytes(b"", scalar.unwrap().as_bytes());
+        //     }
+        // }
+        // let mut transcript_rng = rng_builder.finalize(&mut thread_rng());
         let mut rng = rand::thread_rng();
 
-        let challenges = SecretShare::complete(self.challenge, 0, &mut self.known_chal_shares, &mut rng).unwrap();
+        // threshold is the number of fake_responses which are Some(), plus one to account for the secret itself
+        let threshold = 1 + self.known_chal_shares.iter().filter(|r| r.is_some()).count();
+        let mut sham = Shamir::new(threshold, &mut rng);
+        let challenges = sham.complete(&self.challenge, &self.known_chal_shares).unwrap();
         let blindings = &self.blindings;
         let fake_responses = &self.fake_responses;
         let responses = self.scalars.iter().zip(blindings)
             .zip(fake_responses)
-            .zip(&challenges.shares[1..])
-            .map(|(scBlResp, ch)| {
-                match scBlResp.1.is_some() {
-                    true => scBlResp.1.unwrap(),
-                    false => (scBlResp.0).0.unwrap() * ch + (scBlResp.0).1.unwrap()
+            .zip(&challenges)
+            .map(| (((scalar, blinding), fake_response), challenge) | {
+                match fake_response.is_some() {
+                    true => fake_response.unwrap(),
+                    false => scalar.unwrap() * challenge.unwrap() + blinding.unwrap(),
                 }
             })
             .collect::<Vec<Scalar>>();
-        let out_shares = challenges.shares;
+
+        let out_shares = challenges.iter().map(|s| s.unwrap()).collect();
         let commitments = self.commitments.clone();
         self.proof = BatchableProof{
             challenges: out_shares,
