@@ -203,7 +203,6 @@ fn or_test_basic() {
     // Prover's scope
     let (proof, points) = {
         let x = Scalar::from(89327492234u64).invert();
-        let y = None;
         let A = &x * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
         let B = &Scalar::from(7u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
 
@@ -212,7 +211,7 @@ fn or_test_basic() {
             &mut transcript,
             basic_or_clause::ProveAssignments {
                 x: &Some(x),
-                y: &y,
+                y: &None,
                 A: &A,
                 B: &B,
                 G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
@@ -226,7 +225,7 @@ fn or_test_basic() {
 
     // Verifier logic
     let mut transcript = Transcript::new(b"Or Clause Test");
-    assert!(basic_or_clause::verify_compact(
+    let ver = basic_or_clause::verify_compact(
         &parsed_proof,
         &mut transcript,
         basic_or_clause::VerifyAssignments {
@@ -234,8 +233,8 @@ fn or_test_basic() {
             B: &points.B,
             G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
         },
-    )
-    .is_ok());
+    );
+    assert!(ver.is_ok(), format!("Couldn't verify: {}", ver.unwrap_err()));
 }
 
 #[test]

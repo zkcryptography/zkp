@@ -1,6 +1,6 @@
 use thiserror::Error;
 /// An error during proving or verification, such as a verification failure.
-#[derive(Debug, Error)]
+#[derive(Debug, Error, PartialEq)]
 pub enum ProofError {
     /// Something is wrong with the proof, causing a verification failure.
     #[error("Verification failed.")]

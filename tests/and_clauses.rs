@@ -6,6 +6,9 @@ extern crate curve25519_dalek;
 use curve25519_dalek::constants as dalek_constants;
 use curve25519_dalek::scalar::Scalar;
 
+use env_logger;
+use zkp::errors::ProofError;
+
 #[macro_use]
 extern crate zkp;
 pub use zkp::Transcript;
@@ -13,8 +16,13 @@ pub use zkp::Transcript;
 define_proof! {basic_and_clause, "basic_and_clause", (x,y), (A, B, G), () : A = (G ^ x) && B = (G ^ y)}
 define_proof! {complex_and_clause, "complex_and_clause", (x, y, z, a), (A, B, C, D, G), (): A = (G^x) && B = (G^y) && C = (G^z) && D = (G^a)}
 
+fn init() {
+    let _ = env_logger::builder().is_test(true).try_init();
+}
+
 #[test]
 fn and_test_basic() {
+    init();
     // Prover's scope
     let (proof, points) = {
         let x = Scalar::from(89327492234u64).invert();
@@ -41,20 +49,20 @@ fn and_test_basic() {
 
     // Verifier logic
     let mut transcript = Transcript::new(b"And Clause Test");
-    assert!(basic_and_clause::verify_compact(
+    let ver = basic_and_clause::verify_compact(
         &parsed_proof,
         &mut transcript,
         basic_and_clause::VerifyAssignments {
             A: &points.A,
             B: &points.B,
             G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
-        },
-    )
-    .is_ok());
+        });
+    assert!(ver.is_ok(), format!("Couldn't verify: {}", ver.unwrap_err()));
 }
 
 #[test]
 fn and_test_adv_wrong() {
+    init();
     // Prover's scope
     let (proof, points) = {
         let x = Scalar::from(89327492234u64).invert();
@@ -81,7 +89,7 @@ fn and_test_adv_wrong() {
 
     // Verifier logic
     let mut transcript = Transcript::new(b"And Clause Test");
-    assert!(basic_and_clause::verify_compact(
+    let ver = basic_and_clause::verify_compact(
         &parsed_proof,
         &mut transcript,
         basic_and_clause::VerifyAssignments {
@@ -89,12 +97,15 @@ fn and_test_adv_wrong() {
             B: &points.B,
             G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
         },
-    )
-    .is_err());
+    );
+    assert!(ver.is_err());
+    assert_eq!(ver.unwrap_err(), ProofError::VerificationFailure);
+
 }
 
 #[test]
 fn and_test_complex() {
+    init();
     // Prover's scope
     let res = {
         let x = Scalar::from(89327492234u64).invert();
@@ -142,10 +153,7 @@ fn and_test_complex() {
                     G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
                 },
             );
-            match ver {
-                Err(e) => assert!(false, format!("Error verifying proof: {}", e)),
-                Ok(_) => assert!(true),
-            }
+            assert!(ver.is_ok(), format!("Error verifying proof: {}", ver.unwrap_err()));
         },
     }
 }
@@ -153,6 +161,7 @@ fn and_test_complex() {
 
 #[test]
 fn and_test_insufficient_keys() {
+    init();
     // Prover's scope
     let res = {
         let x = Scalar::from(89327492234u64).invert();

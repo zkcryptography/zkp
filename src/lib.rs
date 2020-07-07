@@ -34,7 +34,7 @@ pub extern crate rand;
 
 pub use merlin::Transcript;
 
-mod errors;
+pub mod errors;
 mod proofs;
 mod util;
 

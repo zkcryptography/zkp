@@ -248,3 +248,9 @@ impl TranscriptProtocol for Transcript {
         Scalar::from_bytes_mod_order_wide(&bytes)
     }
 }
+
+pub enum ProofType {
+    Unknown,
+    Xor,
+    Shamir,
+}
