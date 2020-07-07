@@ -386,7 +386,6 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
     }
 
     fn challenge(&mut self) {
-        // trace!("Prover's transcript is {:?}", self.transcript);
         self.challenge = self.transcript.get_challenge(b"chal");
         trace!("Prover's transcript challenge is {:?}", self.challenge);
     }
@@ -396,15 +395,7 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         let fake_responses = &self.fake_responses;
         let responses: Vec<Scalar>;
 
-        // Construct a TranscriptRng
-        let mut rng_builder = self.transcript.build_rng();
-        for scalar in &self.scalars {
-            if scalar.is_some() {
-                rng_builder = rng_builder.rekey_with_witness_bytes(b"", scalar.unwrap().as_bytes());
-            }
-        }
-        let mut rng = rng_builder.finalize(&mut thread_rng());
-        // let mut rng = rand::thread_rng();
+        let mut rng = rand::thread_rng();
         let challenges: Vec<Scalar>;
 
         match self.proof_type {

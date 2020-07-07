@@ -37,7 +37,6 @@ pub struct Verifier<'a> {
     point_labels: Vec<&'static [u8]>,
     constraints: Vec<(usize, PointVar, Vec<(ScalarVar, PointVar)>)>,
     subroutines: Vec<Verifier<'a>>,
-    // proof_type: ProofType,
 }
 
 /// A secret variable used during verification.
@@ -62,7 +61,6 @@ impl<'a> Verifier<'a> {
             point_labels: Vec::default(),
             constraints: Vec::default(),
             subroutines: Vec::default(),
-            // proof_type: ProofType::Unknown,
         }
     }
 

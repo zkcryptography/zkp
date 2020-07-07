@@ -133,7 +133,7 @@ impl<R> secrets::SecretSharing for Shamir<R> where R: RngCore + CryptoRng {
         return Ok(shares);
     }
 
-    /// GNote that the new shares have NO GUARANTEE of being derived from the same polynomial as the provided ones.  
+    /// Note that the new shares have NO GUARANTEE of being derived from the same polynomial as the provided ones.  
     /// We pick an all-new polynomial which fits the provided points.
     ///
     /// The sparse_shares vector should follow the "index + 1 = x" convention, but is allowed to contain None values
