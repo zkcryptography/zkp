@@ -387,7 +387,7 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
 
     fn challenge(&mut self) {
         self.challenge = self.transcript.get_challenge(b"chal");
-        trace!("Prover's transcript challenge is {:?}", self.challenge);
+        debug!("Prover's transcript challenge is {:?}", self.challenge);
     }
 
     fn response(&mut self) {
@@ -396,47 +396,42 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         let responses: Vec<Scalar>;
 
         let mut rng = rand::thread_rng();
-        let challenges: Vec<Scalar>;
 
-        match self.proof_type {
+        let mut sharing: Box<dyn SecretSharing> = match self.proof_type {
             ProofType::Xor => {
-                let mut xor = Xor::new(&mut rng);
-                let unique_challenges = xor.complete(&self.challenge, &self.known_chal_shares).unwrap();
-                trace!("Unique challenges: {:?}", unique_challenges);
-                challenges = self.constraints.iter().map(|(clause_nr, _, _)| {
-                    unique_challenges[*clause_nr - 1]
-                }).collect();
-
-                responses = self.scalars.iter().zip(blindings)
-                    .zip(fake_responses)
-                    .zip(&challenges)
-                    .map(| (((scalar, blinding), fake_response), challenge) | {
-                        match fake_response.is_some() {
-                            true => fake_response.unwrap(),
-                            false => scalar.unwrap() * challenge + blinding.unwrap(),
-                        }
-                    })
-                    .collect::<Vec<Scalar>>();
+                Box::from(Xor::new(&mut rng)) as Box<dyn SecretSharing>
             },
             ProofType::Shamir => {
                 let threshold = 1 + self.known_chal_shares.iter().filter(|r| r.is_some()).count();
-                let mut sham = Shamir::new(threshold, &mut rng);
-                challenges = sham.complete(&self.challenge, &self.known_chal_shares).unwrap();
-                responses = self.scalars.iter().zip(blindings)
-                    .zip(fake_responses)
-                    .zip(&challenges)
-                    .map(| (((scalar, blinding), fake_response), challenge) | {
-                        match fake_response.is_some() {
-                            true => fake_response.unwrap(),
-                            false => scalar.unwrap() * challenge + blinding.unwrap(),
-                        }
-                    })
-                    .collect::<Vec<Scalar>>();
+                Box::from(Shamir::new(threshold, &mut rng)) as Box<dyn SecretSharing>
             },
             _ => {
                 panic!("This isn't implemented yet!");
             }
         };
+
+        let mut challenges = sharing.complete(&self.challenge, &self.known_chal_shares).unwrap();
+        trace!("Challenges: {:?}", challenges);
+
+        match self.proof_type {
+            ProofType::Xor => {
+                challenges = self.constraints.iter().map(|(clause_nr, _, _)| {
+                    challenges[*clause_nr - 1]
+                }).collect();
+            },
+            _ => ()
+        };
+
+        responses = self.scalars.iter().zip(blindings)
+                    .zip(fake_responses)
+                    .zip(&challenges)
+                    .map(| (((scalar, blinding), fake_response), challenge) | {
+                        match fake_response.is_some() {
+                            true => fake_response.unwrap(),
+                            false => scalar.unwrap() * challenge + blinding.unwrap(),
+                        }
+                    })
+                    .collect::<Vec<Scalar>>();
 
         let out_shares = challenges;
         let commitments = self.commitments.clone();

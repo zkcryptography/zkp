@@ -105,43 +105,14 @@ impl<'a> Verifier<'a> {
             .collect::<Option<Vec<RistrettoPoint>>>()
             .ok_or(ProofError::DecompressionError)?;
 
-        let rec_challenge: Result<Scalar, String>;
+        // NOTE: this is only used for the XOR-type sharing
+        let mut clause_challenges: HashMap<usize, Scalar> = HashMap::new();
 
-        match proof_type {
-            ProofType::Shamir => {
-                // Recompute the prover's commitments based on their claimed challenge value:
-                for (index, (_, lhs_var, rhs_lc)) in self.constraints.iter().enumerate() {
-                    debug!("Looking up challenge for index {}", index);
-                    let minus_c = -proof.challenges[index];
-                    let commitment = RistrettoPoint::vartime_multiscalar_mul(
-                        rhs_lc
-                            .iter()
-                            .map(|(sc_var, _pt_var)| {
-                                proof.responses[sc_var.0]
-                            })
-                            .chain(iter::once(minus_c)),
-                        rhs_lc
-                            .iter()
-                            .map(|(_sc_var, pt_var)| points[pt_var.0])
-                            .chain(iter::once(points[lhs_var.0])),
-                    );
-
-                    let encoding = self.transcript
-                        .append_blinding_commitment(self.point_labels[lhs_var.0], &commitment);
-                    trace!("Appending blinding {:?}", encoding);
-                }
-
-                // threshold is the number of public keys NOT in the known signature group, plus at least one in the known signature group
-                let threshold = (self.constraints.len() - 1) * self.constraints[0].2.len() + 1;
-                let mut sham = Shamir::new_without_rng(threshold);
-                rec_challenge = sham.reconstruct(&proof.challenges);
-            },
-            ProofType::Xor => {
-                let mut clause_challenges: HashMap<usize, Scalar> = HashMap::new();
-                // Recompute the prover's commitments based on their claimed challenge value:
-                for (index, (clause_nr, lhs_var, rhs_lc)) in self.constraints.iter().enumerate() {
-                    let c = proof.challenges[index];
-                    trace!("Verifier challenge for index {} is  {:?}", index, c);
+        for (index, (clause_nr, lhs_var, rhs_lc)) in self.constraints.iter().enumerate() {
+            let c = proof.challenges[index];
+            trace!("Verifier challenge for index {} is  {:?}", index, c);
+            match proof_type {
+                ProofType::Xor => {
                     match clause_challenges.get(clause_nr) {
                         Some(cc) => {
                             // check to make sure this challenge meets what we expect for this clause
@@ -153,30 +124,39 @@ impl<'a> Verifier<'a> {
                             clause_challenges.insert(*clause_nr, c);
                         }
                     }
-                    let minus_c = -c;
-                    let commitment = RistrettoPoint::vartime_multiscalar_mul(
-                        rhs_lc
-                            .iter()
-                            .map(|(sc_var, _pt_var)| {
-                                proof.responses[sc_var.0]
-                            })
-                            .chain(iter::once(minus_c)),
-                        rhs_lc
-                            .iter()
-                            .map(|(_sc_var, pt_var)| points[pt_var.0])
-                            .chain(iter::once(points[lhs_var.0])),
-                    );
+                },
+                _ => {}
+            }
 
-                    let encoding = self.transcript
-                        .append_blinding_commitment(self.point_labels[lhs_var.0], &commitment);
-                    trace!("Appending blinding {:?}", encoding);
-                }
+            let minus_c = -c;
+            let commitment = RistrettoPoint::vartime_multiscalar_mul(
+                rhs_lc
+                    .iter()
+                    .map(|(sc_var, _pt_var)| {
+                        proof.responses[sc_var.0]
+                    })
+                    .chain(iter::once(minus_c)),
+                rhs_lc
+                    .iter()
+                    .map(|(_sc_var, pt_var)| points[pt_var.0])
+                    .chain(iter::once(points[lhs_var.0])),
+            );
+            let encoding = self.transcript
+                .append_blinding_commitment(self.point_labels[lhs_var.0], &commitment);
+            trace!("Appending blinding {:?}", encoding);
+        }
 
+        let rec_challenge = match proof_type {
+            ProofType::Shamir => {
+                let threshold = (self.constraints.len() - 1) * self.constraints[0].2.len() + 1;
+                let mut sham = Shamir::new_without_rng(threshold);
+                sham.reconstruct(&proof.challenges)
+            },
+            ProofType::Xor => {
                 let mut xor = Xor::new_without_rng();
-
                 // we only have a challenge per clause, not constraint, so we have to find only the unique challenges
                 let challenges = clause_challenges.values().map(|s| *s).collect();
-                rec_challenge = xor.reconstruct(&challenges);
+                xor.reconstruct(&challenges)
             },
             _ => {
                 panic!("This isn't implemented yet!");
@@ -184,7 +164,7 @@ impl<'a> Verifier<'a> {
         };
 
         let challenge = self.transcript.get_challenge(b"chal");
-        trace!("Verifier's transcript challenge is {:?}", challenge);
+        debug!("Verifier's transcript challenge is {:?}", challenge);
 
         if rec_challenge.is_ok() && challenge == rec_challenge.unwrap() {
             Ok(())
@@ -207,34 +187,17 @@ impl<'a> Verifier<'a> {
         // TODO automatic decision of what proof type to verify
         let proof_type = ProofType::Xor;
 
-        let rec_challenge: Result<Scalar, String>;
-        match proof_type {
-            ProofType::Shamir => {
-                // Feed the prover's commitments into the transcript:
-                for (i, commitment) in proof.commitments.iter().enumerate() {
-                    let (_, ref lhs_var, ref _rhs_lc) = self.constraints[i];
-                    self.transcript.validate_and_append_blinding_commitment(
-                        self.point_labels[lhs_var.0],
-                        &commitment,
-                    )?;
-                }
-                
-                // threshold is the number of public keys NOT in the known signature group, plus at least one in the known signature group
-                let threshold = (self.constraints.len() - 1) * self.constraints[0].2.len() + 1;
-                let mut sham = Shamir::new_without_rng(threshold);
-                rec_challenge = sham.reconstruct(&proof.challenges);
-            },
-            ProofType::Xor => {
-                let mut clause_challenges: HashMap<usize, Scalar> = HashMap::new();
+        // NOTE: this is only used for XOR-style sharing
+        let mut clause_challenges: HashMap<usize, Scalar> = HashMap::new();
+        for (i, commitment) in proof.commitments.iter().enumerate() {
+            let (ref clause_nr, ref lhs_var, ref _rhs_lc) = self.constraints[i];
+            self.transcript.validate_and_append_blinding_commitment(
+                self.point_labels[lhs_var.0],
+                &commitment,
+            )?;
 
-                // Feed the prover's commitments into the transcript:
-                for (i, commitment) in proof.commitments.iter().enumerate() {
-                    let (ref clause_nr, ref lhs_var, ref _rhs_lc) = self.constraints[i];
-                    self.transcript.validate_and_append_blinding_commitment(
-                        self.point_labels[lhs_var.0],
-                        &commitment,
-                    )?;
-
+            match proof_type {
+                ProofType::Xor => {
                     let c = proof.challenges[i];
                     match clause_challenges.get(clause_nr) {
                         Some(cc) => {
@@ -247,11 +210,22 @@ impl<'a> Verifier<'a> {
                             clause_challenges.insert(*clause_nr, c);
                         }
                     }
-                }
+                },
+                _ => {}
+            };
+        }
 
+        let rec_challenge = match proof_type {
+            ProofType::Shamir => {
+                // threshold is the number of public keys NOT in the known signature group, plus at least one in the known signature group
+                let threshold = (self.constraints.len() - 1) * self.constraints[0].2.len() + 1;
+                let mut sham = Shamir::new_without_rng(threshold);
+                sham.reconstruct(&proof.challenges)
+            },
+            ProofType::Xor => {
                 let challenges = clause_challenges.values().map(|s| *s).collect();
                 let mut xor = Xor::new_without_rng();
-                rec_challenge = xor.reconstruct(&challenges);
+                xor.reconstruct(&challenges)
             },
             _ => {
                 panic!("This isn't implemented yet!");
