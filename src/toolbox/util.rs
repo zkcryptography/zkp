@@ -1,5 +1,6 @@
 use curve25519_dalek::scalar::Scalar;
 use std::cmp::Ordering;
+use rand::{CryptoRng, RngCore};
 
 /// Raise a Scalar to an arbitrary power.  This code is SUPER dumb: not efficient and not constant-time.
 pub fn pow(x: &Scalar, p: usize) -> Scalar {
@@ -26,6 +27,22 @@ pub fn compare_scalars(a: &Scalar, b: &Scalar) -> Ordering {
         }
     }
     return Ordering::Equal;
+}
+
+/// Get a Scalar distributed randomly across the possible values WITHOUT the highest bit of \ell being set.  That is,
+/// whatever the highest 1-bit of \ell is, we ensure that every Scalar we hand back has that bit set to 0.  This 
+/// ensures the values from this function, whenever XOR'd, will never go above \ell.
+pub fn random_scalar<T>(rng: &mut T) -> Scalar
+where
+    T: RngCore + CryptoRng
+{
+    // each Scalar is 32 bytes
+    let mut bytes = [0 as u8; 32];
+    rng.fill_bytes(&mut bytes);
+
+    // only the lower 4 bits of the final byte are significant, since we ignore the 5th
+    bytes[31] &= 0x0f;
+    Scalar::from_bits(bytes)
 }
 
 #[allow(unused_imports)]

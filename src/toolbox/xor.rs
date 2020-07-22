@@ -2,6 +2,7 @@ use curve25519_dalek::scalar::Scalar;
 use rand::{CryptoRng, RngCore};
 use rand::prelude::ThreadRng;
 use crate::toolbox::secrets;
+use crate::toolbox::util::random_scalar;
 use log::{trace, debug, info};
 
 /// A SecretSharing implementation that is based on the all-shares XOR method.  In particular, you must have every outstanding share
@@ -30,10 +31,10 @@ impl<R> secrets::SecretSharing for Xor<R> where R: RngCore + CryptoRng {
     fn share(&mut self, secret: &Scalar, nr_of_shares: usize) -> Result<Vec<Scalar>, String> {
         info!("Sharing {} pieces of {:?}", nr_of_shares, secret);
         let mut shares: Vec<Scalar> = Vec::new();
-        
+
         // generate n - 1 random shares; the zero-th share is the secret
         for _ in 1..nr_of_shares {
-            shares.push(Scalar::random(&mut self.rng));
+            shares.push(random_scalar(&mut self.rng));
         }
 
         // calculate the final share as a function of the random shares and the secret
@@ -56,7 +57,7 @@ impl<R> secrets::SecretSharing for Xor<R> where R: RngCore + CryptoRng {
             } else {
                 if empties != 0 {     // the "zero-th" empty will be the one we have to XOR-calculate
                     trace!("Pushing a random Scalar to extra empty");
-                    new_shares.push(Scalar::random(&mut self.rng));
+                    new_shares.push(random_scalar(&mut self.rng));
                 }
                 empties += 1;
             }

@@ -9,6 +9,7 @@ use crate::{BatchableProof, CompactProof, Transcript, ProofError};
 use crate::toolbox::shamir::Shamir;
 use crate::toolbox::xor::Xor;
 use crate::toolbox::secrets::SecretSharing;
+use crate::toolbox::util::random_scalar;
 use std::iter;
 use std::str;
 use log::{trace, debug};
@@ -320,7 +321,7 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
                                 shares.push(None);
                             } else {
                                 // this is a faked clause, so we need to randomize a challenge for it
-                                shares.push(Some(Scalar::random(&mut transcript_rng)));
+                                shares.push(Some(random_scalar(&mut transcript_rng)));
                             };
                         },
                         None => (),
