@@ -44,6 +44,9 @@ pub mod verifier;
 pub mod shamir;
 /// generic secret sharing trait
 pub mod secrets;
+/// Implements secret sharing via XOR
+pub mod xor;
+
 pub mod util;
 
 
@@ -244,4 +247,10 @@ impl TranscriptProtocol for Transcript {
         self.challenge_bytes(label, &mut bytes);
         Scalar::from_bytes_mod_order_wide(&bytes)
     }
+}
+
+pub enum ProofType {
+    Unknown,
+    Xor,
+    Shamir,
 }

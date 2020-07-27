@@ -4,10 +4,12 @@ use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::traits::MultiscalarMul;
 
-use crate::toolbox::{SchnorrCS, TranscriptProtocol, IsSigmaProtocol};
+use crate::toolbox::{SchnorrCS, TranscriptProtocol, IsSigmaProtocol, ProofType};
 use crate::{BatchableProof, CompactProof, Transcript, ProofError};
 use crate::toolbox::shamir::Shamir;
+use crate::toolbox::xor::Xor;
 use crate::toolbox::secrets::SecretSharing;
+use crate::toolbox::util::random_scalar;
 use std::iter;
 use std::str;
 use log::{trace, debug};
@@ -42,6 +44,7 @@ pub struct Prover<'a> {
     known_chal_shares: Vec<Option<Scalar>>,
     nr_clauses: usize,
     challenge: Scalar,
+    proof_type: ProofType,
 }
 
 /// A secret variable used during proving.
@@ -70,7 +73,8 @@ impl<'a> Prover<'a> {
             fake_responses: Vec::default(),
             known_chal_shares: Vec::default(),
             nr_clauses: 0,
-            challenge: Default::default()
+            challenge: Default::default(),
+            proof_type: ProofType::Unknown,
         }
     }
 
@@ -105,6 +109,10 @@ impl<'a> Prover<'a> {
             None => 0,
             Some(x) => x.0,
         };
+
+        // TODO decide which type of secret sharing we're going to use
+        self.proof_type = ProofType::Xor;
+
         let result = self.commit();
         if result.is_err() {
             return Err(result.err().unwrap());
@@ -172,90 +180,204 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         let mut fake_responses = Vec::with_capacity(self.constraints.iter().map(|cs| &cs.1).count());
         let mut shares = Vec::with_capacity(self.constraints.len());
         let mut clause_tracker = vec![None; self.nr_clauses+1];
-        // let mut prev_clause_nr = 0;
-        for (clause_nr, lhs_var, rhs_lin_combo) in &self.constraints {
-            debug!("Constraint clause {}: {} = {}",
-                clause_nr,
-                str::from_utf8(self.point_labels[lhs_var.0]).unwrap(),
-                rhs_lin_combo.iter().map(
-                    |(scal, pt)| format!("{} ^ {:?}", str::from_utf8(self.point_labels[pt.0]).unwrap(), scal.0)
-                ).collect::<Vec<String>>().join(" * ")
-            );
 
-            // The first [0] picks the first entry in the linear combination.  We can test against only this one because we
-            // know that all entries in a compound && clause (represented by a single constraint) MUST either be all known, or
-            // all unknown.  Though, we should have a way of checking this in the code before execution reaches this point.
-            // The second .0 pulls out the ScalarVar which the PointVar is to be raised to.  The third .0 selects the single entry
-            // of the ScalarVar tuple, which is a usize representing the index of the ScalarVar's value in self.scalars and self.blindings.
-            let sv_index = (rhs_lin_combo[0].0).0;
-            let commitment = match blindings[sv_index].is_some() {
-                true => {               // if we have a blinding, that means we have a secret value for this variable
-                    clause_tracker[*clause_nr] = match clause_tracker[*clause_nr] {
-                        // this is the first time we've worked with this clause, initialize the tracker
-                        None => Some((1, 1)),
-
-                        // We're adding a new known value, so increment the tracker
-                        Some((terms, filled_in)) => Some((terms+1, filled_in+1)),
+        match self.proof_type {
+            ProofType::Shamir => {
+                for (clause_nr, lhs_var, rhs_lin_combo) in &self.constraints {
+                    debug!("Constraint clause {}: {} = {}",
+                        clause_nr,
+                        str::from_utf8(self.point_labels[lhs_var.0]).unwrap(),
+                        rhs_lin_combo.iter().map(
+                            |(scal, pt)| format!("{} ^ {:?}", str::from_utf8(self.point_labels[pt.0]).unwrap(), scal.0)
+                        ).collect::<Vec<String>>().join(" * ")
+                    );
+        
+                    // The first [0] picks the first entry in the linear combination.  We can test against only this one because we
+                    // know that all entries in a compound && clause (represented by a single constraint) MUST either be all known, or
+                    // all unknown.  Though, we should have a way of checking this in the code before execution reaches this point.
+                    // The second .0 pulls out the ScalarVar which the PointVar is to be raised to.  The third .0 selects the single entry
+                    // of the ScalarVar tuple, which is a usize representing the index of the ScalarVar's value in self.scalars and self.blindings.
+                    let sv_index = (rhs_lin_combo[0].0).0;
+                    let commitment = match blindings[sv_index].is_some() {
+                        true => {               // if we have a blinding, that means we have a secret value for this variable
+                            clause_tracker[*clause_nr] = match clause_tracker[*clause_nr] {
+                                // this is the first time we've worked with this clause, initialize the tracker
+                                None => Some((1, 1)),
+        
+                                // We're adding a new known value, so increment the tracker
+                                Some((terms, filled_in)) => Some((terms+1, filled_in+1)),
+                            };
+        
+                            shares.push(None);
+                            RistrettoPoint::multiscalar_mul(
+                                rhs_lin_combo.iter().map(|(sc_var, _pt_var)| {
+                                    fake_responses.push(None);
+                                    blindings[sc_var.0].unwrap()
+                                }),
+                                rhs_lin_combo.iter().map(|(_sc_var, pt_var)| {
+                                    self.points[pt_var.0]
+                                }),
+                            )
+                        }
+                        false => {              // if we don't have a blinding, we don't have a secret value and will be faking one
+                            clause_tracker[*clause_nr] = match clause_tracker[*clause_nr] {
+                                // this is the first time we've worked with this clause, initialize the tracker
+                                None => Some((1, 0)),
+        
+                                // we've added no new information here, so just count a new clause
+                                Some((terms, filled_in)) => Some((terms+1, filled_in)),
+                            };
+        
+                            let challenge = Scalar::random(&mut transcript_rng);
+                            shares.push(Some(challenge));
+                            RistrettoPoint::multiscalar_mul(
+                                rhs_lin_combo.iter()
+                                    .map(|(_sc_var, _pt_var)| {
+                                        let response = Scalar::random(&mut transcript_rng);
+                                        fake_responses.push(Some(response));
+                                        response
+                                    })
+                                    .chain(iter::once(-&challenge)),
+                                rhs_lin_combo.iter()
+                                    .map(|(_sc_var, pt_var)| self.points[pt_var.0])
+                                    .chain(iter::once(self.points[lhs_var.0])),
+                            )
+                        }
                     };
+        
+                    let encoding = self
+                        .transcript
+                        .append_blinding_commitment(self.point_labels[lhs_var.0], &commitment);
 
-                    shares.push(None);
-                    RistrettoPoint::multiscalar_mul(
-                        rhs_lin_combo.iter().map(|(sc_var, _pt_var)| {
-                            fake_responses.push(None);
-                            blindings[sc_var.0].unwrap()
-                        }),
-                        rhs_lin_combo.iter().map(|(_sc_var, pt_var)| {
-                            self.points[pt_var.0]
-                        }),
-                    )
+                    trace!("Appending blinding {:?}", encoding);
+        
+                    commitments.push(encoding);
                 }
-                false => {              // if we don't have a blinding, we don't have a secret value and will be faking one
-                    clause_tracker[*clause_nr] = match clause_tracker[*clause_nr] {
-                        // this is the first time we've worked with this clause, initialize the tracker
-                        None => Some((1, 0)),
+                // Now that we know all the clauses, make sure at least one is full
+                let mut have_one = false;
+                for (i, clause) in clause_tracker.iter().enumerate() {
+                    match clause {
+                        Some((terms, filled_in)) => {
+                            debug!("Clause {} has {} terms and we know {} keys", i, terms, filled_in);
+                            if terms == filled_in { have_one = true; break; }
+                        },
+                        None => (),
+                    }
+                }
+                if !have_one {
+                    return Err(ProofError::InsufficientKeys)
+                }
+            },
+            ProofType::Xor => {
+                // General approach: we're going to have C clauses, each of which will have D constraints, each of which might have E terms
+                // We've already generated a blinding for each possible E term
+                // We need to track the D constraints so we can calculate completeness of each C
+                // We should only have one fully-complete C, for which the c_i value can be calculated
+                // For all other Cs except 1, we can randomize the c_i value
 
-                        // we've added no new information here, so just count a new clause
-                        Some((terms, filled_in)) => Some((terms+1, filled_in)),
+                // do ClauseTracker logic first, so we can trigger on it later on
+                for (clause_nr, lhs_var, rhs_lin_combo) in &self.constraints {
+                    debug!("Constraint clause {}: {} = {}",
+                        clause_nr,
+                        str::from_utf8(self.point_labels[lhs_var.0]).unwrap(),
+                        rhs_lin_combo.iter().map(
+                            |(scal, pt)| format!("{} ^ {:?}", str::from_utf8(self.point_labels[pt.0]).unwrap(), scal.0)
+                        ).collect::<Vec<String>>().join(" * ")
+                    );
+
+                    let sv_index = (rhs_lin_combo[0].0).0;
+                    match blindings[sv_index].is_some() {
+                        true => {               // if we have a blinding, that means we have a secret value for this variable
+                            clause_tracker[*clause_nr] = match clause_tracker[*clause_nr] {
+                                // this is the first time we've worked with this clause, initialize the tracker
+                                None => Some((1, 1)),
+        
+                                // We're adding a new known value, so increment the tracker
+                                Some((terms, filled_in)) => Some((terms+1, filled_in+1)),
+                            };
+                        },
+                        false => {
+                            clause_tracker[*clause_nr] = match clause_tracker[*clause_nr] {
+                                // this is the first time we've worked with this clause, initialize the tracker
+                                None => Some((1, 0)),
+        
+                                // we've added no new information here, so just count a new clause
+                                Some((terms, filled_in)) => Some((terms+1, filled_in)),
+                            };
+                        }
                     };
+                };
 
-                    let challenge = Scalar::random(&mut transcript_rng);
-                    shares.push(Some(challenge));
-                    RistrettoPoint::multiscalar_mul(
-                        rhs_lin_combo.iter()
-                            .map(|(_sc_var, _pt_var)| {
-                                let response = Scalar::random(&mut transcript_rng);
-                                fake_responses.push(Some(response));
-                                response
-                            })
-                            .chain(iter::once(-&challenge)),
-                        rhs_lin_combo.iter()
-                            .map(|(_sc_var, pt_var)| self.points[pt_var.0])
-                            .chain(iter::once(self.points[lhs_var.0])),
-                    )
+                // Now that we know all the clauses, make sure at least one is full, and generate one challenge share
+                // per clause (NOT per constraint!)
+                let mut have_one = false;
+                for (i, clause) in clause_tracker.iter().enumerate() {
+                    match clause {
+                        Some((terms, filled_in)) => {
+                            debug!("Clause {} has {} terms and we know {} keys", i, terms, filled_in);
+                            if terms == filled_in {
+                                // this is a fully-known clause, so we'll be able to calculate the challenge later on
+                                have_one = true;
+                                shares.push(None);
+                            } else {
+                                // this is a faked clause, so we need to randomize a challenge for it
+                                shares.push(Some(random_scalar(&mut transcript_rng)));
+                            };
+                        },
+                        None => (),
+                    }
                 }
-            };
+                if !have_one {
+                    return Err(ProofError::InsufficientKeys)
+                }
 
-            let encoding = self
-                .transcript
-                .append_blinding_commitment(self.point_labels[lhs_var.0], &commitment);
-
-            commitments.push(encoding);
-        }
-
-        // Now that we know all the clauses, make sure at least one is full
-        let mut have_one = false;
-        for (i, clause) in clause_tracker.iter().enumerate() {
-            match clause {
-                Some((terms, filled_in)) => {
-                    debug!("Clause {} has {} terms and we know {} keys", i, terms, filled_in);
-                    if terms == filled_in { have_one = true; break; }
-                },
-                None => (),
+                // Using the shares, calculate our commitments
+                for (clause_nr, lhs_var, rhs_lin_combo) in &self.constraints {
+                    let sv_index = (rhs_lin_combo[0].0).0;
+                    let commitment = match blindings[sv_index].is_some() {
+                        true => {               // if we have a blinding, that means we have a secret value for this variable        
+                            RistrettoPoint::multiscalar_mul(
+                                rhs_lin_combo.iter().map(|(sc_var, _pt_var)| {
+                                    fake_responses.push(None);
+                                    blindings[sc_var.0].unwrap()
+                                }),
+                                rhs_lin_combo.iter().map(|(_sc_var, pt_var)| {
+                                    self.points[pt_var.0]
+                                }),
+                            )
+                        }
+                        false => {              // if we don't have a blinding, we don't have a secret value and will be faking one        
+                            let challenge = shares[*clause_nr - 1].unwrap();
+                            RistrettoPoint::multiscalar_mul(
+                                rhs_lin_combo.iter()
+                                    .map(|(_sc_var, _pt_var)| {
+                                        let response = Scalar::random(&mut transcript_rng);
+                                        fake_responses.push(Some(response));
+                                        response
+                                    })
+                                    .chain(iter::once(-&challenge)),
+                                rhs_lin_combo.iter()
+                                    .map(|(_sc_var, pt_var)| self.points[pt_var.0])
+                                    .chain(iter::once(self.points[lhs_var.0])),
+                            )
+                        }
+                    };
+        
+                    let encoding = self
+                        .transcript
+                        .append_blinding_commitment(self.point_labels[lhs_var.0], &commitment);
+                    
+                    trace!("Appending blinding {:?}", encoding);
+        
+                    commitments.push(encoding);
+                }
+            },
+            _ => {
+                panic!("This isn't implemented yet!");
             }
         }
-        if !have_one {
-            return Err(ProofError::InsufficientKeys)
-        }
+
+        debug!("Prover generated shares {:?}", shares);
         
         self.blindings = blindings;
         self.commitments = commitments;
@@ -266,37 +388,53 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
 
     fn challenge(&mut self) {
         self.challenge = self.transcript.get_challenge(b"chal");
+        debug!("Prover's transcript challenge is {:?}", self.challenge);
     }
 
     fn response(&mut self) {
-        // Construct a TranscriptRng
-        // let mut rng_builder = self.transcript.build_rng();
-        // for scalar in &self.scalars {
-        //     if scalar.is_some() {
-        //         rng_builder = rng_builder.rekey_with_witness_bytes(b"", scalar.unwrap().as_bytes());
-        //     }
-        // }
-        // let mut transcript_rng = rng_builder.finalize(&mut thread_rng());
-        let mut rng = rand::thread_rng();
-
-        // threshold is the number of fake_responses which are Some(), plus one to account for the secret itself
-        let threshold = 1 + self.known_chal_shares.iter().filter(|r| r.is_some()).count();
-        let mut sham = Shamir::new(threshold, &mut rng);
-        let challenges = sham.complete(&self.challenge, &self.known_chal_shares).unwrap();
         let blindings = &self.blindings;
         let fake_responses = &self.fake_responses;
-        let responses = self.scalars.iter().zip(blindings)
-            .zip(fake_responses)
-            .zip(&challenges)
-            .map(| (((scalar, blinding), fake_response), challenge) | {
-                match fake_response.is_some() {
-                    true => fake_response.unwrap(),
-                    false => scalar.unwrap() * challenge.unwrap() + blinding.unwrap(),
-                }
-            })
-            .collect::<Vec<Scalar>>();
+        let responses: Vec<Scalar>;
 
-        let out_shares = challenges.iter().map(|s| s.unwrap()).collect();
+        let mut rng = rand::thread_rng();
+
+        let mut sharing: Box<dyn SecretSharing> = match self.proof_type {
+            ProofType::Xor => {
+                Box::from(Xor::new(&mut rng)) as Box<dyn SecretSharing>
+            },
+            ProofType::Shamir => {
+                let threshold = 1 + self.known_chal_shares.iter().filter(|r| r.is_some()).count();
+                Box::from(Shamir::new(threshold, &mut rng)) as Box<dyn SecretSharing>
+            },
+            _ => {
+                panic!("This isn't implemented yet!");
+            }
+        };
+
+        let mut challenges = sharing.complete(&self.challenge, &self.known_chal_shares).unwrap();
+        trace!("Challenges: {:?}", challenges);
+
+        match self.proof_type {
+            ProofType::Xor => {
+                challenges = self.constraints.iter().map(|(clause_nr, _, _)| {
+                    challenges[*clause_nr - 1]
+                }).collect();
+            },
+            _ => ()
+        };
+
+        responses = self.scalars.iter().zip(blindings)
+                    .zip(fake_responses)
+                    .zip(&challenges)
+                    .map(| (((scalar, blinding), fake_response), challenge) | {
+                        match fake_response.is_some() {
+                            true => fake_response.unwrap(),
+                            false => scalar.unwrap() * challenge + blinding.unwrap(),
+                        }
+                    })
+                    .collect::<Vec<Scalar>>();
+
+        let out_shares = challenges;
         let commitments = self.commitments.clone();
         self.proof = BatchableProof{
             challenges: out_shares,
