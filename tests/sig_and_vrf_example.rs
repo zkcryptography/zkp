@@ -21,8 +21,8 @@ use curve25519_dalek::scalar::Scalar;
 extern crate zkp;
 pub use zkp::Transcript;
 
-define_proof! {sig_proof, "Sig", (x), (A), (B) : A = (B ^ x) }
-define_proof! {vrf_proof, "VRF", (x), (A, G, H), (B) : A = (B ^ x) && G = (H ^ x) }
+define_proof! {SigProof, "Sig", (x), (A), (B) : A = (B ^ x) }
+define_proof! {VrfProof, "VRF", (x), (A, G, H), (B) : A = (B ^ x) && G = (H ^ x) }
 
 define_proof! {test_parsing_no_common, "test_parsing_no_common", (x, y), (A, G, H, B), () : A = (B ^ x * H^y) && G = (H ^ x) && G = (H ^ x) }
 define_proof! {test_parsing_no_pub, "test_parsing_no_pub", (x, y), (), (A, G, H, B) : A = (B ^ x * H^y) && G = (H ^ x) && G = (H ^ x) }
@@ -78,11 +78,11 @@ impl From<SecretKey> for KeyPair {
     }
 }
 
-pub struct Signature(sig_proof::BatchableProof);
+pub struct Signature(SigProof::BatchableProof);
 
 pub struct VrfOutput(CompressedRistretto);
 
-pub struct VrfProof(vrf_proof::CompactProof);
+pub struct VrfCompact(VrfProof::CompactProof);
 
 impl KeyPair {
     fn public_key(&self) -> PublicKey {
@@ -91,9 +91,9 @@ impl KeyPair {
 
     fn sign(&self, message: &[u8], sig_transcript: &mut Transcript) -> Signature {
         sig_transcript.append_message_example(message);
-        let (proof, _points) = sig_proof::prove_batchable(
+        let (proof, _points) = SigProof::new().prove_batchable(
             sig_transcript,
-            sig_proof::ProveAssignments {
+            SigProof::ProveAssignments {
                 x: &Some(self.sk.0),
                 A: &self.pk.0,
                 B: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
@@ -109,16 +109,16 @@ impl KeyPair {
         mut function_transcript: Transcript,
         message: &[u8],
         proof_transcript: &mut Transcript,
-    ) -> (VrfOutput, VrfProof) {
+    ) -> (VrfOutput, VrfCompact) {
         // Use function_transcript to hash the message to a point H
         function_transcript.append_message_example(message);
         let H = function_transcript.hash_to_group();
 
         // Compute the VRF output G and form a proof
         let G = &H * &self.sk.0;
-        let (proof, points) = vrf_proof::prove_compact(
+        let (proof, points) = VrfProof::new().prove_compact(
             proof_transcript,
-            vrf_proof::ProveAssignments {
+            VrfProof::ProveAssignments {
                 x: &Some(self.sk.0),
                 A: &self.pk.0,
                 B: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
@@ -127,7 +127,7 @@ impl KeyPair {
             },
         ).unwrap();
 
-        (VrfOutput(points.G), VrfProof(proof))
+        (VrfOutput(points.G), VrfCompact(proof))
     }
 }
 
@@ -139,10 +139,10 @@ impl Signature {
         sig_transcript: &mut Transcript,
     ) -> Result<(), ()> {
         sig_transcript.append_message_example(message);
-        sig_proof::verify_batchable(
+        SigProof::new().verify_batchable(
             &self.0,
             sig_transcript,
-            sig_proof::VerifyAssignments {
+            SigProof::VerifyAssignments {
                 A: &pubkey.1,
                 B: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
             },
@@ -159,16 +159,16 @@ impl VrfOutput {
         message: &[u8],
         pubkey: &PublicKey,
         proof_transcript: &mut Transcript,
-        proof: &VrfProof,
+        proof: &VrfCompact,
     ) -> Result<(), ()> {
         // Use function_transcript to hash the message to a point H
         function_transcript.append_message_example(message);
         let H = function_transcript.hash_to_group().compress();
 
-        vrf_proof::verify_compact(
+        VrfProof::new().verify_compact(
             &proof.0,
             proof_transcript,
-            vrf_proof::VerifyAssignments {
+            VrfProof::VerifyAssignments {
                 A: &pubkey.1,
                 B: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
                 G: &self.0,

@@ -25,7 +25,7 @@ use curve25519_dalek::scalar::Scalar;
 
 use zkp::Transcript;
 
-define_proof! {dleq, "DLEQ Example Proof", (x), (A, B, H), (G) : A = (G ^ x) && B = (H ^ x) }
+define_proof! {Dleq, "DLEQ Example Proof", (x), (A, B, H), (G) : A = (G ^ x) && B = (H ^ x) }
 
 #[test]
 fn create_and_verify_compact() {
@@ -37,9 +37,9 @@ fn create_and_verify_compact() {
         let B = &x * &H;
 
         let mut transcript = Transcript::new(b"DLEQTest");
-        dleq::prove_compact(
+        Dleq::new().prove_compact(
             &mut transcript,
-            dleq::ProveAssignments {
+            Dleq::ProveAssignments {
                 x: &Some(x),
                 A: &A,
                 B: &B,
@@ -51,14 +51,14 @@ fn create_and_verify_compact() {
 
     // Serialize and parse bincode representation
     let proof_bytes = bincode::serialize(&proof).unwrap();
-    let parsed_proof: dleq::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+    let parsed_proof: Dleq::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
 
     // Verifier logic
     let mut transcript = Transcript::new(b"DLEQTest");
-    assert!(dleq::verify_compact(
+    assert!(Dleq::new().verify_compact(
         &parsed_proof,
         &mut transcript,
-        dleq::VerifyAssignments {
+        Dleq::VerifyAssignments {
             A: &points.A,
             B: &points.B,
             G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
@@ -80,9 +80,9 @@ fn create_and_verify_batchable() {
         let B = &x * &H;
 
         let mut transcript = Transcript::new(b"DLEQTest");
-        dleq::prove_batchable(
+        Dleq::new().prove_batchable(
             &mut transcript,
-            dleq::ProveAssignments {
+            Dleq::ProveAssignments {
                 x: &Some(x),
                 A: &A,
                 B: &B,
@@ -94,14 +94,14 @@ fn create_and_verify_batchable() {
 
     // Serialize and parse bincode representation
     let proof_bytes = bincode::serialize(&proof).unwrap();
-    let parsed_proof: dleq::BatchableProof = bincode::deserialize(&proof_bytes).unwrap();
+    let parsed_proof: Dleq::BatchableProof = bincode::deserialize(&proof_bytes).unwrap();
 
     // Verifier logic
     let mut transcript = Transcript::new(b"DLEQTest");
-    assert!(dleq::verify_batchable(
+    assert!(Dleq::new().verify_batchable(
         &parsed_proof,
         &mut transcript,
-        dleq::VerifyAssignments {
+        Dleq::VerifyAssignments {
             A: &points.A,
             B: &points.B,
             G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
@@ -133,9 +133,9 @@ fn create_batch_and_batch_verify() {
             let B = &x * &H;
 
             let mut transcript = Transcript::new(b"DLEQTest");
-            let (proof, points) = dleq::prove_batchable(
+            let (proof, points) = Dleq::new().prove_batchable(
                 &mut transcript,
-                dleq::ProveAssignments {
+                Dleq::ProveAssignments {
                     x: &Some(x),
                     A: &A,
                     B: &B,
@@ -155,10 +155,10 @@ fn create_batch_and_batch_verify() {
     // Verifier logic
     let mut transcripts = vec![Transcript::new(b"DLEQTest"); messages.len()];
 
-    assert!(dleq::batch_verify(
+    assert!(Dleq::new().batch_verify(
         &proofs,
         transcripts.iter_mut().collect(),
-        dleq::BatchVerifyAssignments {
+        Dleq::BatchVerifyAssignments {
             A: pubkeys,
             B: vrf_outputs,
             H: messages

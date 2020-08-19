@@ -4,8 +4,8 @@ use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::traits::MultiscalarMul;
 
-use crate::toolbox::{SchnorrCS, TranscriptProtocol, IsSigmaProtocol, ProofType};
-use crate::{BatchableProof, CompactProof, Transcript, ProofError};
+use crate::toolbox::{SchnorrCS, TranscriptProtocol, IsSigmaProtocol, IsProverAssignments, ProofType};
+use crate::{BatchableProof, Transcript, ProofError};
 use crate::toolbox::shamir::Shamir;
 use crate::toolbox::xor::Xor;
 use crate::toolbox::secrets::SecretSharing;
@@ -35,15 +35,12 @@ pub struct Prover<'a> {
     constraints: Vec<(usize, PointVar, Vec<(ScalarVar, PointVar)>)>,
     subroutines: Vec<Prover<'a>>,
 
-    proof: BatchableProof,
-
     //internals
     commitments: Vec<CompressedRistretto>,
     blindings: Vec<Option<Scalar>>,
     fake_responses: Vec<Option<Scalar>>,
     known_chal_shares: Vec<Option<Scalar>>,
-    nr_clauses: usize,
-    challenge: Scalar,
+    pub nr_clauses: usize,
     proof_type: ProofType,
 }
 
@@ -67,14 +64,12 @@ impl<'a> Prover<'a> {
             point_labels: Vec::default(),
             constraints: Vec::default(),
             subroutines: Vec::default(),
-            proof: BatchableProof::default(),
             commitments: Vec::default(),
             blindings: Vec::default(),
             fake_responses: Vec::default(),
             known_chal_shares: Vec::default(),
             nr_clauses: 0,
-            challenge: Default::default(),
-            proof_type: ProofType::Unknown,
+            proof_type: ProofType::Xor,     // TODO eventually this should be autodiscovered somehow
         }
     }
 
@@ -102,58 +97,12 @@ impl<'a> Prover<'a> {
         self.point_labels.push(label);
         (PointVar(self.points.len() - 1), compressed)
     }
-
-    /// The compact and batchable proofs differ only by which data they store.
-    fn prove_impl(mut self) -> Result<BatchableProof, ProofError> {
-        self.nr_clauses = match self.constraints.last() {
-            None => 0,
-            Some(x) => x.0,
-        };
-
-        // TODO decide which type of secret sharing we're going to use
-        self.proof_type = ProofType::Xor;
-
-        let result = self.commit();
-        if result.is_err() {
-            return Err(result.err().unwrap());
-        };
-
-        // Obtain a scalar challenge and compute responses
-        self.challenge();
-        self.response();
-        Ok(self.proof)
-    }
-
-    /// Consume this prover to produce a compact proof.
-    pub fn prove_compact(self) -> Result<CompactProof, ProofError> {
-        let result = self.prove_impl();
-        let proof = match result.is_ok() {
-            true => result.unwrap(),
-            false => return Err(result.err().unwrap())
-        };
-
-        Ok(CompactProof {
-            challenges: proof.challenges,
-            responses: proof.responses,
-        })
-    }
-
-    /// Consume this prover to produce a batchable proof.
-    pub fn prove_batchable(self) -> Result<BatchableProof, ProofError> {
-        let result = self.prove_impl();
-        let proof = match result.is_ok() {
-            true => result.unwrap(),
-            false => return Err(result.err().unwrap())
-        };
-
-        Ok(proof)
-    }
 }
 
-impl<'a> IsSigmaProtocol for Prover<'a> {
-    type Proof = BatchableProof;
+impl<'a, P> IsSigmaProtocol<P> for Prover<'a> where P: IsProverAssignments {
+    type Proof = BatchableProof;        // TODO we need to make this configurable
 
-    fn commit(&mut self) -> Result<(), ProofError> {
+    fn commit(&mut self, assignments: P) -> Result<(), ProofError> {
         // Construct a TranscriptRng
         let mut rng_builder = self.transcript.build_rng();
         for scalar in &self.scalars {
@@ -164,10 +113,7 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         let mut transcript_rng = rng_builder.finalize(&mut thread_rng());
 
         // Generate a blinding factor for each secret variable
-        let blindings = self
-            .scalars
-            .iter()
-            .map(|scalar| {
+        let blindings = assignments.secret_vars().iter().map(|scalar| {
                 return match scalar.is_some() {
                     true => Some(Scalar::random(&mut transcript_rng)),
                     false => None
@@ -386,12 +332,19 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
         Ok(())
     }
 
-    fn challenge(&mut self) {
-        self.challenge = self.transcript.get_challenge(b"chal");
-        debug!("Prover's transcript challenge is {:?}", self.challenge);
+    fn simulate(&mut self, _assignments: P) -> (Vec<Scalar>, Vec<Scalar>) {
+        (vec![], vec![])
+        // TODO
     }
 
-    fn response(&mut self) {
+    fn challenge(&mut self) -> Scalar {
+        let challenge = self.transcript.get_challenge(b"chal");
+        debug!("Prover's transcript challenge is {:?}", challenge);
+        challenge
+    }
+
+    // TODO it looks like we don't modify the transcript here; is that what we want?
+    fn response(&mut self, challenge: Scalar, _assignments: P) -> Self::Proof {
         let blindings = &self.blindings;
         let fake_responses = &self.fake_responses;
         let responses: Vec<Scalar>;
@@ -411,7 +364,7 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
             }
         };
 
-        let mut challenges = sharing.complete(&self.challenge, &self.known_chal_shares).unwrap();
+        let mut challenges = sharing.complete(&challenge, &self.known_chal_shares).unwrap();
         trace!("Challenges: {:?}", challenges);
 
         match self.proof_type {
@@ -436,11 +389,11 @@ impl<'a> IsSigmaProtocol for Prover<'a> {
 
         let out_shares = challenges;
         let commitments = self.commitments.clone();
-        self.proof = BatchableProof{
+        Self::Proof{
             challenges: out_shares,
             responses,
             commitments,
-        };
+        }
     }
 }
 

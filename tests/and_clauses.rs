@@ -13,8 +13,8 @@ use zkp::errors::ProofError;
 extern crate zkp;
 pub use zkp::Transcript;
 
-define_proof! {basic_and_clause, "basic_and_clause", (x,y), (A, B, G), () : A = (G ^ x) && B = (G ^ y)}
-define_proof! {complex_and_clause, "complex_and_clause", (x, y, z, a), (A, B, C, D, G), (): A = (G^x) && B = (G^y) && C = (G^z) && D = (G^a)}
+define_proof! {BasicAndClause, "basic_and_clause", (x,y), (A, B, G), () : A = (G ^ x) && B = (G ^ y)}
+define_proof! {ComplexAndClause, "complex_and_clause", (x, y, z, a), (A, B, C, D, G), (): A = (G^x) && B = (G^y) && C = (G^z) && D = (G^a)}
 
 fn init() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -31,9 +31,9 @@ fn and_test_basic() {
         let B = &y * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
 
         let mut transcript = Transcript::new(b"And Clause Test");
-        basic_and_clause::prove_compact(
+        BasicAndClause::new().prove_compact(
             &mut transcript,
-            basic_and_clause::ProveAssignments {
+            BasicAndClause::ProveAssignments {
                 x: &Some(x),
                 y: &Some(y),
                 A: &A,
@@ -45,14 +45,14 @@ fn and_test_basic() {
 
     // Serialize and parse bincode representation
     let proof_bytes = bincode::serialize(&proof).unwrap();
-    let parsed_proof: basic_and_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+    let parsed_proof: BasicAndClause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
 
     // Verifier logic
     let mut transcript = Transcript::new(b"And Clause Test");
-    let ver = basic_and_clause::verify_compact(
+    let ver = BasicAndClause::new().verify_compact(
         &parsed_proof,
         &mut transcript,
-        basic_and_clause::VerifyAssignments {
+        BasicAndClause::VerifyAssignments {
             A: &points.A,
             B: &points.B,
             G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
@@ -71,9 +71,9 @@ fn and_test_adv_wrong() {
         let B = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
 
         let mut transcript = Transcript::new(b"And Clause Test");
-        basic_and_clause::prove_compact(
+        BasicAndClause::new().prove_compact(
             &mut transcript,
-            basic_and_clause::ProveAssignments {
+            BasicAndClause::ProveAssignments {
                 x: &Some(x),
                 y: &Some(y),
                 A: &A,
@@ -85,14 +85,14 @@ fn and_test_adv_wrong() {
 
     // Serialize and parse bincode representation
     let proof_bytes = bincode::serialize(&proof).unwrap();
-    let parsed_proof: basic_and_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+    let parsed_proof: BasicAndClause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
 
     // Verifier logic
     let mut transcript = Transcript::new(b"And Clause Test");
-    let ver = basic_and_clause::verify_compact(
+    let ver = BasicAndClause::new().verify_compact(
         &parsed_proof,
         &mut transcript,
-        basic_and_clause::VerifyAssignments {
+        BasicAndClause::VerifyAssignments {
             A: &points.A,
             B: &points.B,
             G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
@@ -117,9 +117,9 @@ fn and_test_complex() {
         let D = &a * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
 
         let mut transcript = Transcript::new(b"And Clause Test");
-        complex_and_clause::prove_compact(
+        ComplexAndClause::new().prove_compact(
             &mut transcript,
-            complex_and_clause::ProveAssignments {
+            ComplexAndClause::ProveAssignments {
                 x: &Some(x),
                 y: &Some(y),
                 z: &Some(z),
@@ -137,14 +137,14 @@ fn and_test_complex() {
         Ok((proof, points)) => {
             // Serialize and parse bincode representation
             let proof_bytes = bincode::serialize(&proof).unwrap();
-            let parsed_proof: complex_and_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+            let parsed_proof: ComplexAndClause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
 
             // Verifier logic
             let mut transcript = Transcript::new(b"And Clause Test");
-            let ver = complex_and_clause::verify_compact(
+            let ver = ComplexAndClause::new().verify_compact(
                 &parsed_proof,
                 &mut transcript,
-                complex_and_clause::VerifyAssignments {
+                ComplexAndClause::VerifyAssignments {
                     A: &points.A,
                     B: &points.B,
                     C: &points.C,
@@ -168,9 +168,9 @@ fn and_test_insufficient_keys() {
         let B = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
 
         let mut transcript = Transcript::new(b"And Clause Test");
-        basic_and_clause::prove_compact(
+        BasicAndClause::new().prove_compact(
             &mut transcript,
-            basic_and_clause::ProveAssignments {
+            BasicAndClause::ProveAssignments {
                 x: &Some(x),
                 y: &None,
                 A: &A,
@@ -193,9 +193,9 @@ fn and_test_adv_none() {
         let B = &Scalar::from(3u32) * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
 
         let mut transcript = Transcript::new(b"And Clause Test");
-        basic_and_clause::prove_compact(
+        BasicAndClause::new().prove_compact(
             &mut transcript,
-            basic_and_clause::ProveAssignments {
+            BasicAndClause::ProveAssignments {
                 x: &Some(x),
                 y: &Some(y),
                 A: &A,
@@ -207,14 +207,14 @@ fn and_test_adv_none() {
 
     // Serialize and parse bincode representation
     let proof_bytes = bincode::serialize(&proof).unwrap();
-    let parsed_proof: basic_and_clause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+    let parsed_proof: BasicAndClause::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
 
     // Verifier logic
     let mut transcript = Transcript::new(b"And Clause Test");
-    let ver = basic_and_clause::verify_compact(
+    let ver = BasicAndClause::new().verify_compact(
         &parsed_proof,
         &mut transcript,
-        basic_and_clause::VerifyAssignments {
+        BasicAndClause::VerifyAssignments {
             A: &points.A,
             B: &points.B,
             G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,

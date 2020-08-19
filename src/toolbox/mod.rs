@@ -111,12 +111,19 @@ pub trait SchnorrCS {
     fn add_subroutine(&mut self, subroutine: Self::SubroutineVar);
 }
 
-pub trait IsSigmaProtocol {
+pub trait IsProverAssignments: Clone {
+    fn secret_vars(&self)   -> Vec<&Option<Scalar>>;
+    fn instance_vars(&self) -> Vec<&RistrettoPoint>;
+    fn common_vars(&self)   -> Vec<&RistrettoPoint>;
+}
+
+pub trait IsSigmaProtocol<P: IsProverAssignments> {
     type Proof: Clone;
 
-    fn commit(&mut self) -> Result<(), ProofError>;
-    fn challenge(&mut self);
-    fn response(&mut self);
+    fn commit(&mut self, assignments: P) -> Result<(), ProofError>;
+    fn challenge(&mut self) -> Scalar; // challenge
+    fn response(&mut self, challenge: Scalar, assignments: P) -> Self::Proof;
+    fn simulate(&mut self, assignments: P) -> (Vec<Scalar>, Vec<Scalar>); // fake_challenges, responses
 }
 
 /// This trait defines the wire format for how the constraint system
