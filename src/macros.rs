@@ -31,8 +31,8 @@ macro_rules! __parse_subroutine {
     ( $wrong:tt ) => {
         Err("Wrong")
     };
-    ( $subroutine:item ) => {
-        Ok($subroutine)
+    ( $name:ident, ( $($secret_var:ident),+ ), ( $($instance_var:ident),* ) ) => {
+        $name::new()
     };
 }
 
