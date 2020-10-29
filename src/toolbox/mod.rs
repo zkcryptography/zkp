@@ -54,7 +54,7 @@ use curve25519_dalek::ristretto::{CompressedRistretto, RistrettoPoint};
 use curve25519_dalek::scalar::Scalar;
 use curve25519_dalek::traits::IsIdentity;
 
-use crate::{ProofError, Transcript};
+use crate::{ProofError, Transcript, BatchableProof};
 
 /// An interface for specifying proof statements, common between
 /// provers and verifiers.
@@ -117,14 +117,30 @@ pub trait IsProverAssignments: Clone {
     fn common_vars(&self)   -> Vec<&RistrettoPoint>;
 }
 
-pub trait IsSigmaProtocol<P: IsProverAssignments> {
+pub trait Proooof<P: IsProverAssignments> {
     type Proof: Clone;
 
     fn commit(&mut self, assignments: P) -> Result<(), ProofError>;
     fn challenge(&mut self) -> Scalar; // challenge
     fn response(&mut self, challenge: Scalar, assignments: P) -> Self::Proof;
     fn simulate(&mut self, assignments: P) -> (Vec<Scalar>, Vec<Scalar>); // fake_challenges, responses
+// }
+
+// pub trait HasProofData {
+    fn push_scalar(&mut self, scal: Option<Scalar>);
+    fn get_scalars(&self) -> Vec<&Option<Scalar>>;
+
+    fn push_point(&mut self, pt: RistrettoPoint);
+    fn get_points(&self) -> Vec<RistrettoPoint>;
+
+    fn push_point_label(&mut self, label: &'static [u8]);
+    fn get_point_labels(&self) -> Vec<&'static [u8]>;
+
+    fn push_constraint(&mut self, clause_nr: usize, lhs: prover::PointVar, linear_combination: Vec<(prover::ScalarVar, prover::PointVar)>);
+    fn push_subroutine(&mut self, subroutine: Box<dyn Proooof<P, Proof = Proof>>);
 }
+
+// pub trait Proooof<Q>: IsSigmaProtocol<Q, Proof=BatchableProof> + HasProofData {}
 
 /// This trait defines the wire format for how the constraint system
 /// interacts with the proof transcript.
