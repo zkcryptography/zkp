@@ -21,7 +21,7 @@ use curve25519_dalek::scalar::Scalar;
 
 use zkp::Transcript;
 
-define_proof! {dlp, "Discrete Log Proof", (x), (A), (G) : A = (G ^ x) }
+define_proof! {Dlp, "Discrete Log Proof", (x), (A), (G) : A = (G ^ x) }
 
 #[test]
 fn super_basic_create_and_verify() {
@@ -31,9 +31,9 @@ fn super_basic_create_and_verify() {
         let A = &x * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
 
         let mut transcript = Transcript::new(b"Discrete Log Test");
-        dlp::prove_compact(
+        Dlp::new().prove_compact(
             &mut transcript,
-            dlp::ProveAssignments {
+            Dlp::ProveAssignments {
                 x: &Some(x),
                 A: &A,
                 G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
@@ -44,14 +44,14 @@ fn super_basic_create_and_verify() {
     // Serialize and parse bincode representation
     let proof_bytes = bincode::serialize(&proof).unwrap();
     // println!("{:?}", proof_bytes);
-    let parsed_proof: dlp::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+    let parsed_proof: Dlp::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
 
     // Verifier logic
     let mut transcript = Transcript::new(b"Discrete Log Test");
-    assert!(dlp::verify_compact(
+    assert!(Dlp::new().verify_compact(
         &parsed_proof,
         &mut transcript,
-        dlp::VerifyAssignments {
+        Dlp::VerifyAssignments {
             A: &points.A,
             G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
         },
@@ -68,9 +68,9 @@ fn super_basic_failing_test() {
         let A = &y * &dalek_constants::RISTRETTO_BASEPOINT_TABLE;
 
         let mut transcript = Transcript::new(b"Discrete Log Test");
-        dlp::prove_compact(
+        Dlp::new().prove_compact(
             &mut transcript,
-            dlp::ProveAssignments {
+            Dlp::ProveAssignments {
                 x: &Some(x),
                 A: &A,
                 G: &dalek_constants::RISTRETTO_BASEPOINT_POINT,
@@ -81,13 +81,13 @@ fn super_basic_failing_test() {
     // Serialize and parse bincode representation
     let proof_bytes = bincode::serialize(&proof).unwrap();
     // println!("{:?}", proof_bytes);
-    let parsed_proof: dlp::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
+    let parsed_proof: Dlp::CompactProof = bincode::deserialize(&proof_bytes).unwrap();
 
     // Verifier logic
     let mut transcript = Transcript::new(b"Discrete Log Test");
-    let res = dlp::verify_compact(&parsed_proof,
+    let res = Dlp::new().verify_compact(&parsed_proof,
         &mut transcript,
-        dlp::VerifyAssignments {
+        Dlp::VerifyAssignments {
             A: &points.A,
             G: &dalek_constants::RISTRETTO_BASEPOINT_COMPRESSED,
         }
